@@ -1,0 +1,29 @@
+# Tests on every push, and a Windows build to download from the run's page.
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tests
+        run: |
+          rustc --version
+          cargo test --manifest-path framedata/Cargo.toml
+          cargo test
+      - name: Build
+        run: cargo build --release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: recorder-windows
+          path: target/release/recorder.exe
+          if-no-files-found: error
+          retention-days: 30

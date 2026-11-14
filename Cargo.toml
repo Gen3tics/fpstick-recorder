@@ -1,0 +1,38 @@
+[package]
+name = "recorder"
+version = "0.1.0"
+edition = "2021"
+description = "FPStick Recorder: records an Overwatch match with Intel PresentMon and packs the frame and network timing for a run page"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Gen3tics/fpstick-recorder"
+publish = false
+
+[lib]
+name = "recorder"
+path = "src/lib.rs"
+
+[[bin]]
+name = "recorder"
+path = "src/main.rs"
+
+[dependencies]
+framedata = { path = "framedata" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_System_Com", "Win32_System_Diagnostics_Etw", "Win32_System_Performance", "Win32_System_Time", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(not(windows))'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "x11"] }
+
+[features]
+# Writes a picture of the window to the file named in EFRAME_SCREENSHOT_TO, then quits. For checking the look.
+screenshot = ["eframe/__screenshot"]
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+strip = true
+panic = "abort"

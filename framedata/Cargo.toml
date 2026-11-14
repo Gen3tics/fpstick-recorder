@@ -1,0 +1,12 @@
+[package]
+name = "framedata"
+version = "0.1.0"
+edition = "2021"
+description = "Reads a PresentMon per-frame file into a table of numbers and packs that table small (format FPSF1)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Gen3tics/fpstick-recorder"
+publish = false
+
+[dependencies]
+flate2 = "1"
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
