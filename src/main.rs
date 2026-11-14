@@ -36,7 +36,7 @@ fn main() {
         Some("record") => std::process::exit(record(&args)),
         Some("nettest") => std::process::exit(nettest()),
         Some("send") if args.len() == 4 && args[2] == "--to" => {
-            // to a run-page server, with what this PC says about itself and nothing typed in
+            // to a run-page server, with what this PC says about itself and what the recording's own notes hold
             // the game's graphics settings, the picture's size and refresh rate, and the time of the recording come
             // from the run.json beside the file, if it is there: they are what was read while the game was running
             let folder = std::path::Path::new(&args[1]).parent().map(|p| p.to_path_buf()).unwrap_or_default();
@@ -47,7 +47,10 @@ fn main() {
             if game_settings.is_some() {
                 println!("with the game's graphics settings from run.json");
             }
-            let info = serde_json::json!({"declared": {}, "read": {"cpu": platform::cpu_name(), "gpu": platform::gpu_name(), "resolution": resolution, "refresh_hz": refresh_hz}, "captured_at": captured_at, "game_settings": game_settings});
+            // what was typed in on the Done screen when the recording was made is in run.json too
+            let typed = |k: &str| note.as_ref().and_then(|n| n["scene"][k].as_str()).map(|v| v.trim().to_string()).unwrap_or_default();
+            let declared = serde_json::json!({"map": typed("map"), "mode": typed("mode"), "hero": typed("hero"), "limit_fps": typed("frame_limit")});
+            let info = serde_json::json!({"declared": declared, "read": {"cpu": platform::cpu_name(), "gpu": platform::gpu_name(), "resolution": resolution, "refresh_hz": refresh_hz}, "captured_at": captured_at, "game_settings": game_settings});
             let sent = recorder::send::target(&args[3]).and_then(|t| t.ok_or_else(|| "Give an address after --to.".to_string())).and_then(|host| {
                 std::fs::read(&args[1]).map_err(|e| e.to_string()).and_then(|d| {
                     // the network timing recorded beside it goes along, if there is any
