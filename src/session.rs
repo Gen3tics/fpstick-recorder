@@ -36,6 +36,8 @@ pub struct Outcome {
     pub net: Option<NetSummary>,
     /// Why there is no network record although one was asked for.
     pub net_note: Option<String>,
+    /// The game's graphics settings as its settings file held them, in the shape that is sent; None if the file was not found.
+    pub game_settings: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -249,7 +251,9 @@ fn run(c: &Choices, seconds: Option<u64>, exe: &Path, root: &Path, stop: &Atomic
         }
         None => None,
     };
+    let settings_note = crate::settings::note(settings_at_start, crate::settings::read());
     let out = Outcome {
+        game_settings: crate::settings::for_upload(&settings_note),
         net,
         net_note,
         recording_bytes: std::fs::metadata(&recording).map(|m| m.len()).unwrap_or(0),
@@ -270,7 +274,7 @@ fn run(c: &Choices, seconds: Option<u64>, exe: &Path, root: &Path, stop: &Atomic
         "frames": frames, "recorded_s": recorded_s,
         "network": out.net.as_ref().map(|n| serde_json::json!({"packets": n.datagrams, "remote_ends": n.flows, "route_pings_asked_for": n.pings_asked, "pings": n.probes, "routers_pinged": n.hops, "events_lost": n.events_lost})),
         "network_note": out.net_note,
-        "game_settings": crate::settings::note(settings_at_start, crate::settings::read()),
+        "game_settings": settings_note,
     });
     let _ = std::fs::write(folder.join("run.json"), serde_json::to_vec_pretty(&note).unwrap_or_default());
     Ok(Some(out))

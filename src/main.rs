@@ -30,7 +30,14 @@ fn main() {
         Some("send") if args.len() == 4 && args[2] == "--to" => {
             // to a run-page server, with what this PC says about itself and nothing typed in
             let (resolution, refresh_hz) = recorder::send::screen(platform::display().as_deref());
-            let info = serde_json::json!({"declared": {}, "read": {"cpu": platform::cpu_name(), "gpu": platform::gpu_name(), "resolution": resolution, "refresh_hz": refresh_hz}});
+            // the game's graphics settings and the time of the recording come from the run.json beside the file, if it is there
+            let folder = std::path::Path::new(&args[1]).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+            let game_settings = recorder::settings::for_upload_from(&folder);
+            let captured_at = std::fs::read(folder.join("run.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).and_then(|n| n.get("captured_at").cloned());
+            if game_settings.is_some() {
+                println!("with the game's graphics settings from run.json");
+            }
+            let info = serde_json::json!({"declared": {}, "read": {"cpu": platform::cpu_name(), "gpu": platform::gpu_name(), "resolution": resolution, "refresh_hz": refresh_hz}, "captured_at": captured_at, "game_settings": game_settings});
             let sent = recorder::send::target(&args[3]).and_then(|t| t.ok_or_else(|| "Give an address after --to.".to_string())).and_then(|host| {
                 std::fs::read(&args[1]).map_err(|e| e.to_string()).and_then(|d| {
                     // the network timing recorded beside it goes along, if there is any

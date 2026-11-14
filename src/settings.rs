@@ -2,8 +2,12 @@
 //!
 //! Overwatch keeps its settings in `Documents\Overwatch\Settings\Settings_v0.ini`: sections such as
 //! `[Render.13]` holding lines such as `RenderScale = "0"`. Only the sections whose name begins with
-//! "Render" are read: they hold the graphics settings. The copy goes into the recording's `run.json` and
-//! stays on the PC; nothing of it is sent yet.
+//! "Render" are read: they hold the graphics settings. The copy goes into the recording's `run.json`. When
+//! Send is pressed for a run-page server, the lines of that section go along, so that two runs made at
+//! different graphics settings are not compared as if they were alike. No other section is read or sent.
+//!
+//! The game writes only the settings that differ from its defaults, so a setting that is not in the file
+//! is at the game's default; what that default is, the file does not say.
 //!
 //! Two limits, both noted with the copy:
 //!   - The game is said to write this file only when it closes. A setting changed after the game was
@@ -79,9 +83,38 @@ pub fn note(start: Option<Value>, end: Option<Value>) -> Value {
     })
 }
 
+/// What goes to a run-page server, from the note in run.json: the graphics section's lines as they stood
+/// when the recording ended (at its start, if the file did not change), and whether the file changed.
+pub fn for_upload(note: &Value) -> Option<Value> {
+    if note.get("read").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let copy = note.get("at_end").filter(|v| v.is_object()).or_else(|| note.get("at_start"))?;
+    // one section in practice; were there several, the one with the most lines
+    let (section, values) = copy.get("render")?.as_object()?.iter().filter(|(_, v)| v.as_object().map(|o| !o.is_empty()).unwrap_or(false)).max_by_key(|(_, v)| v.as_object().map(|o| o.len()).unwrap_or(0))?;
+    Some(json!({"section": section, "values": values, "changed_while_recording": note.get("changed_while_recording").and_then(Value::as_bool)}))
+}
+
+/// The same, for a recording made earlier: read from the `run.json` in its folder.
+pub fn for_upload_from(folder: &Path) -> Option<Value> {
+    let note: Value = serde_json::from_slice(&std::fs::read(folder.join("run.json")).ok()?).ok()?;
+    for_upload(note.get("game_settings")?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_is_sent_is_the_graphics_section_as_it_stood_at_the_end() {
+        let a = json!({"render": {"Render.13": {"AADetail": "0", "RenderScale": "-2"}}, "file_last_written_s_ago": 5});
+        let b = json!({"render": {"Render.13": {"AADetail": "0", "RenderScale": "0"}}, "file_last_written_s_ago": 1});
+        let same = for_upload(&note(Some(a.clone()), Some(a.clone()))).unwrap();
+        assert_eq!(same, json!({"section": "Render.13", "values": {"AADetail": "0", "RenderScale": "-2"}, "changed_while_recording": false}));
+        let changed = for_upload(&note(Some(a), Some(b))).unwrap();
+        assert_eq!((changed["values"]["RenderScale"].as_str(), changed["changed_while_recording"].as_bool()), (Some("0"), Some(true)));
+        assert!(for_upload(&note(None, None)).is_none(), "no settings file, nothing to send");
+    }
 
     const SAMPLE: &str = "[Cinematics.1]\r\nShowIntro = \"0\"\r\n\r\n[GPU.6]\r\nGPUName = \"NVIDIA GeForce GTX 1050\"\r\n\r\n[Render.13]\r\nAADetail = \"0\"\r\nFullScreenRefresh = \"60\"\r\nRenderScale = \"-2\"\r\nWindowMode = \"2\"\r\nodd key = \"x\"\r\n\r\n[Sound.3]\r\nMusicVolume = \"10.000000\"\r\n";
 

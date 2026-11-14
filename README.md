@@ -49,7 +49,10 @@ not install a hook into the mouse's or keyboard's input.
 - `run.json`: when it was recorded, the command that ran, what you typed in, the CPU model, graphics
   card model and screen mode read from the PC, and the graphics settings from the game's own settings
   file (`Documents\Overwatch\Settings\Settings_v0.ini`, the sections named "Render"), read when the
-  recording starts and again when it ends. The settings stay on the PC for now.
+  recording starts and again when it ends. Send includes the lines of that section (about 45, such as
+  texture detail, effects quality, the frame cap and the window mode), so that runs made at different
+  graphics settings are not compared as if they were alike. No other section of that file is read. The
+  game writes only settings that differ from its defaults, so a setting that is missing is at its default.
 
 ## Building
 

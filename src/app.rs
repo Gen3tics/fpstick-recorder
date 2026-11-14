@@ -102,7 +102,7 @@ impl App {
             "countdown" => still(Phase::Countdown, 3.2),
             "recording" => still(Phase::Recording, 0.0),
             "finishing" => still(Phase::Finishing, 557.0),
-            "done" => View::Done(Outcome { packed: folder.join("frames.fpsf"), folder, recording_bytes: 38_300_000, packed_bytes: 6_310_000, frames: 167_865, recorded_s: 557.0, captured_at: "2026-11-11T16:47:13".into(), cpu: Some("AMD Ryzen 7 9850X3D 8-Core Processor".into()), gpu: Some("NVIDIA GeForce RTX 5090".into()), display: Some("2560 x 1440 at 360 Hz".into()), net: Some(recorder::net::NetSummary { datagrams: 106_512, received: 35_310, sent: 35_600, flows: 3, flow1_share: 0.666, probes: 8_340, hops: vec!["router", "isp", "edge"], pings_asked: true, events_lost: 0, ipv6: 0 }), net_note: None }, Arc::new(Mutex::new(Sent::No))),
+            "done" => View::Done(Outcome { game_settings: Some(serde_json::json!({"section": "Render.13", "values": {"TextureDetail": "1"}, "changed_while_recording": false})), packed: folder.join("frames.fpsf"), folder, recording_bytes: 38_300_000, packed_bytes: 6_310_000, frames: 167_865, recorded_s: 557.0, captured_at: "2026-11-11T16:47:13".into(), cpu: Some("AMD Ryzen 7 9850X3D 8-Core Processor".into()), gpu: Some("NVIDIA GeForce RTX 5090".into()), display: Some("2560 x 1440 at 360 Hz".into()), net: Some(recorder::net::NetSummary { datagrams: 106_512, received: 35_310, sent: 35_600, flows: 3, flow1_share: 0.666, probes: 8_340, hops: vec!["router", "isp", "edge"], pings_asked: true, events_lost: 0, ipv6: 0 }), net_note: None }, Arc::new(Mutex::new(Sent::No))),
             "failed" => View::Failed("Overwatch is not running. Start the game, then press Record again.".into()),
             "command" => {
                 self.show_command = true;
@@ -463,6 +463,9 @@ impl App {
         if let Some(line) = &net_line {
             item(ui, true, line.clone());
         }
+        if o.game_settings.is_some() {
+            item(ui, true, "Your Overwatch graphics settings, to make comparisons fair".into());
+        }
         item(ui, true, "What you typed in: map, mode, hero, frame limit".into());
         if let Some(why) = &o.net_note {
             ui.label(RichText::new(format!("No network stats: {}", why)).size(13.0).color(AMBER));
@@ -500,6 +503,7 @@ impl App {
                                     "declared": {"map": c.map.trim(), "mode": c.mode.trim(), "hero": c.hero.trim(), "limit_fps": c.frame_limit.trim()},
                                     "read": {"cpu": o.cpu, "gpu": o.gpu, "resolution": resolution, "refresh_hz": refresh_hz},
                                     "captured_at": o.captured_at,
+                                    "game_settings": o.game_settings,
                                 });
                                 let net = if o.net.is_some() { send::network_block(&o.packed, &data) } else { None };
                                 send::send_server(&host, &data, &info, net.as_deref()).map(|kept| {
