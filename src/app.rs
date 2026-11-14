@@ -300,7 +300,7 @@ impl App {
             switch(ui, &mut self.choices.hold_to_stop, true);
             ui.label(RichText::new("Hold for 1 second, so a press in a fight does not end it").size(13.0));
         });
-        note(ui, "It also stops after 30 minutes, or when the game closes.");
+        note(ui, &format!("It also stops after {} minutes, or when the game closes.", config::CAP_S / 60));
 
         note(ui, "Also read from this PC when a recording ends: the CPU and graphics card model and the screen's mode.");
 
@@ -369,7 +369,7 @@ impl App {
                 ui.label(RichText::new(how_to_stop.as_str()).size(14.0).color(MUT));
                 note(ui, match self.choices.seconds() {
                     Some(n) => format!("It stops by itself after {}, or when the game closes. You will hear a sound.", span(n as f64)),
-                    None => "You will hear a sound when it stops. It also stops after 30 minutes, or when the game closes.".to_string(),
+                    None => format!("You will hear a sound when it stops. It also stops after {} minutes, or when the game closes.", config::CAP_S / 60),
                 }
                 .as_str());
             });

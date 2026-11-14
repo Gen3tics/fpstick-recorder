@@ -6,7 +6,7 @@ use std::path::PathBuf;
 /// Seconds between pressing Record and the recording starting: time to get back into the game.
 pub const COUNTDOWN_S: u64 = 5;
 /// A recording ends by itself after this long, so a forgotten one does not run all night.
-pub const CAP_S: u64 = 30 * 60;
+pub const CAP_S: u64 = 45 * 60;
 /// How long the stop key is held when "hold to stop" is on.
 pub const HOLD_MS: u64 = 1000;
 /// How often the stop key is looked at while recording, in milliseconds. A key that must be held for a

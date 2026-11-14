@@ -19,7 +19,7 @@ own decision under that game's terms; the sections below say exactly what this p
 1. Asks Windows for administrator rights, once. PresentMon cannot record without them.
 2. Counts down five seconds, so you can get back into the game.
 3. Starts Intel's PresentMon, unchanged, with the command the window shows. A sound says it has started.
-4. Stops when the length you picked is over, when you press (or hold) your stop key, after 30 minutes,
+4. Stops when the length you picked is over, when you press (or hold) your stop key, after 45 minutes,
    or when the game closes. A second sound says it has stopped.
 5. Reads the file PresentMon wrote and packs the frame timing into `frames.fpsf` beside it.
 6. Shows what would be sent and what stays on the PC. Nothing is sent before you press Send.
