@@ -146,6 +146,8 @@ fn run(c: &Choices, seconds: Option<u64>, exe: &Path, root: &Path, stop: &Atomic
     });
     // the game's settings as its file holds them now; read again when the recording has ended
     let settings_at_start = crate::settings::read();
+    // the game's picture and the screen it is on, asked of Windows about the game's own window; asked again at the end
+    let screen_at_start = platform::game_screen(&c.process);
     // The network record starts first and stops last, so it covers the whole frame recording.
     // If it cannot start, the frames are still recorded and the reason is kept.
     let (mut capture, mut net_note) = (None, None);
@@ -252,6 +254,10 @@ fn run(c: &Choices, seconds: Option<u64>, exe: &Path, root: &Path, stop: &Atomic
         None => None,
     };
     let settings_note = crate::settings::note(settings_at_start, crate::settings::read());
+    // The picture's size and the refresh rate go with the run only if Windows gave them for the game's own
+    // window. The main screen's mode is kept in the note beside the recording, and is not sent in their place:
+    // it is wrong for a game in a window, and for a game on a second screen.
+    let screen = platform::pick_screen(screen_at_start, platform::game_screen(&c.process));
     let out = Outcome {
         game_settings: crate::settings::for_upload(&settings_note),
         net,
@@ -265,12 +271,12 @@ fn run(c: &Choices, seconds: Option<u64>, exe: &Path, root: &Path, stop: &Atomic
         captured_at,
         cpu: platform::cpu_name(),
         gpu: platform::gpu_name(),
-        display: platform::display(),
+        display: screen.as_ref().map(|(s, _)| s.shown()),
     };
     let note = serde_json::json!({
         "recorder": env!("CARGO_PKG_VERSION"), "captured_at": out.captured_at, "command": shown,
         "scene": {"map": c.map, "mode": c.mode, "hero": c.hero, "frame_limit": c.frame_limit},
-        "read_from_this_pc": {"cpu": out.cpu, "gpu": out.gpu, "display": out.display},
+        "read_from_this_pc": {"cpu": out.cpu, "gpu": out.gpu, "display": out.display, "game_window": screen.as_ref().map(|(s, at)| s.note(at)), "main_screen": platform::display()},
         "frames": frames, "recorded_s": recorded_s,
         "network": out.net.as_ref().map(|n| serde_json::json!({"packets": n.datagrams, "remote_ends": n.flows, "route_pings_asked_for": n.pings_asked, "pings": n.probes, "routers_pinged": n.hops, "events_lost": n.events_lost})),
         "network_note": out.net_note,

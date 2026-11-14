@@ -46,17 +46,61 @@ pub fn find_presentmon() -> Option<PathBuf> {
     None
 }
 
+/// What Windows says about the game's own window: the size of its picture, and the screen it is on.
+/// In fullscreen the two sizes are the same, because the screen's current mode is the game's mode; in a window
+/// the picture is the window's inside. The game's settings file cannot say any of this for the window modes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GameScreen {
+    pub picture: (u32, u32),
+    pub screen: (u32, u32),
+    pub refresh_hz: u32,
+    /// the game's window was the one in front when this was read
+    pub in_front: bool,
+    /// the screen it is on is the main one
+    pub main_screen: bool,
+}
+
+impl GameScreen {
+    /// "2560 x 1440 at 360 Hz": the picture's size and the refresh rate of the screen it is shown on.
+    pub fn shown(&self) -> String {
+        format!("{} x {} at {} Hz", self.picture.0, self.picture.1, self.refresh_hz)
+    }
+
+    pub fn note(&self, read_at: &str) -> serde_json::Value {
+        serde_json::json!({"picture": format!("{} x {}", self.picture.0, self.picture.1), "screen": format!("{} x {}", self.screen.0, self.screen.1),
+            "refresh_hz": self.refresh_hz, "game_in_front": self.in_front, "main_screen": self.main_screen, "read_at": read_at})
+    }
+}
+
+/// Of a reading taken when the recording started and one taken when it ended, the one to keep: the first that
+/// was taken with the game in front; failing that, the first there is. With it, the word for when it was taken.
+pub fn pick_screen(start: Option<GameScreen>, end: Option<GameScreen>) -> Option<(GameScreen, &'static str)> {
+    match (start, end) {
+        (Some(s), _) if s.in_front => Some((s, "start")),
+        (_, Some(e)) if e.in_front => Some((e, "end")),
+        (Some(s), _) => Some((s, "start")),
+        (None, Some(e)) => Some((e, "end")),
+        (None, None) => None,
+    }
+}
+
 #[cfg(windows)]
 mod imp {
+    use super::GameScreen;
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Graphics::Gdi::{EnumDisplayDevicesW, EnumDisplaySettingsW, DEVMODEW, DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{
+        EnumDisplayDevicesW, EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromWindow, DEVMODEW, DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS, MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
+    };
     use windows_sys::Win32::System::Diagnostics::Debug::Beep;
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
     use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
     use windows_sys::Win32::System::SystemInformation::GetLocalTime;
     use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, WaitForSingleObject, THREAD_PRIORITY_LOWEST};
+    use windows_sys::Win32::UI::HiDpi::{SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetClientRect, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible};
     use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
 
     fn wide(s: &str) -> Vec<u16> {
@@ -132,6 +176,68 @@ mod imp {
             return None;
         }
         Some(format!("{} x {} at {} Hz", m.dmPelsWidth, m.dmPelsHeight, m.dmDisplayFrequency))
+    }
+
+    /// The largest visible window of a process that is not minimised, with the size of its inside.
+    fn main_window(pid: u32) -> Option<(HWND, u32, u32)> {
+        struct Find {
+            pid: u32,
+            best: Option<(HWND, u32, u32)>,
+        }
+        unsafe extern "system" fn each(hwnd: HWND, l: LPARAM) -> i32 {
+            let f = &mut *(l as *mut Find);
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == f.pid && IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0 {
+                let mut r: RECT = std::mem::zeroed();
+                if GetClientRect(hwnd, &mut r) != 0 && r.right > 0 && r.bottom > 0 {
+                    let (w, h) = (r.right as u32, r.bottom as u32);
+                    if f.best.map(|(_, bw, bh)| (w as u64) * (h as u64) > (bw as u64) * (bh as u64)).unwrap_or(true) {
+                        f.best = Some((hwnd, w, h));
+                    }
+                }
+            }
+            1
+        }
+        let mut f = Find { pid, best: None };
+        unsafe { EnumWindows(Some(each), &mut f as *mut Find as LPARAM) };
+        f.best
+    }
+
+    /// The game's picture and the screen it is on, asked of Windows about the game's own window. None: the
+    /// game has no visible window just now (not running, or minimised), or Windows would not say.
+    /// Sizes are asked for in real pixels: this thread is switched to "per-monitor aware" for the asking, so
+    /// Windows does not hand back sizes divided by the display's scaling.
+    pub fn game_screen(process: &str) -> Option<GameScreen> {
+        let pid = crate::net::pid_of(process)?;
+        unsafe {
+            let before = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            let found = (|| {
+                let (hwnd, w, h) = main_window(pid)?;
+                let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                let mut info: MONITORINFOEXW = std::mem::zeroed();
+                info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+                if GetMonitorInfoW(mon, &mut info as *mut MONITORINFOEXW as *mut MONITORINFO) == 0 {
+                    return None;
+                }
+                let mut m: DEVMODEW = std::mem::zeroed();
+                m.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+                if EnumDisplaySettingsW(info.szDevice.as_ptr(), ENUM_CURRENT_SETTINGS, &mut m) == 0 || m.dmDisplayFrequency < 2 {
+                    return None; // under 2 Hz is no refresh rate; better nothing than a number that is not one
+                }
+                Some(GameScreen {
+                    picture: (w, h),
+                    screen: (m.dmPelsWidth, m.dmPelsHeight),
+                    refresh_hz: m.dmDisplayFrequency,
+                    in_front: GetForegroundWindow() == hwnd,
+                    main_screen: info.monitorInfo.dwFlags & 1 != 0, // MONITORINFOF_PRIMARY
+                })
+            })();
+            if !before.is_null() {
+                SetThreadDpiAwarenessContext(before);
+            }
+            found
+        }
     }
 
     pub fn process_running(name: &str) -> bool {
@@ -222,6 +328,9 @@ mod imp {
     pub fn display() -> Option<String> {
         None
     }
+    pub fn game_screen(_process: &str) -> Option<super::GameScreen> {
+        None
+    }
     pub fn process_running(_name: &str) -> bool {
         false
     }
@@ -257,4 +366,27 @@ pub fn sound_start() {
 pub fn sound_stop() {
     beep(990, 110);
     beep(660, 160);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn screen(w: u32, h: u32, hz: u32, in_front: bool) -> GameScreen {
+        GameScreen { picture: (w, h), screen: (2560, 1440), refresh_hz: hz, in_front, main_screen: true }
+    }
+
+    #[test]
+    fn the_reading_taken_with_the_game_in_front_is_kept() {
+        let (windowed, full) = (screen(1584, 821, 360, false), screen(2560, 1440, 360, true));
+        assert_eq!(pick_screen(Some(full.clone()), Some(windowed.clone())), Some((full.clone(), "start")));
+        assert_eq!(pick_screen(Some(windowed.clone()), Some(full.clone())), Some((full.clone(), "end")));
+        assert_eq!(pick_screen(Some(windowed.clone()), Some(windowed.clone())), Some((windowed.clone(), "start")));
+        assert_eq!(pick_screen(None, Some(windowed.clone())), Some((windowed.clone(), "end")));
+        assert_eq!(pick_screen(None, None), None);
+        assert_eq!(windowed.shown(), "1584 x 821 at 360 Hz");
+        assert_eq!(crate::send::screen(Some(&windowed.shown())), (Some("1584 x 821".to_string()), Some("360".to_string())));
+        let note = windowed.note("start");
+        assert_eq!((note["picture"].as_str(), note["screen"].as_str(), note["refresh_hz"].as_u64(), note["game_in_front"].as_bool()), (Some("1584 x 821"), Some("2560 x 1440"), Some(360), Some(false)));
+    }
 }

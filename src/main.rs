@@ -15,6 +15,14 @@ use std::path::Path;
 /// `recorder nettest`              checks the network record on this PC with packets this program sends to itself
 /// `recorder send FILE.fpsf`       hand a packed recording to the run-page program on this PC and print the run page's address
 /// `recorder send FILE.fpsf --to http://HOST:PORT`   send it to a run-page server instead
+/// The picture and the screen of a program's window, as one line.
+fn screen_line(process: &str) -> String {
+    match platform::game_screen(process) {
+        Some(s) => format!("{}, on a screen of {} x {}{}{}", s.shown(), s.screen.0, s.screen.1, if s.main_screen { " (the main one)" } else { " (not the main one)" }, if s.in_front { ", in front" } else { ", not in front" }),
+        None => "not found (not running, or minimised)".into(),
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(|s| s.as_str()) {
@@ -29,11 +37,13 @@ fn main() {
         Some("nettest") => std::process::exit(nettest()),
         Some("send") if args.len() == 4 && args[2] == "--to" => {
             // to a run-page server, with what this PC says about itself and nothing typed in
-            let (resolution, refresh_hz) = recorder::send::screen(platform::display().as_deref());
-            // the game's graphics settings and the time of the recording come from the run.json beside the file, if it is there
+            // the game's graphics settings, the picture's size and refresh rate, and the time of the recording come
+            // from the run.json beside the file, if it is there: they are what was read while the game was running
             let folder = std::path::Path::new(&args[1]).parent().map(|p| p.to_path_buf()).unwrap_or_default();
             let game_settings = recorder::settings::for_upload_from(&folder);
-            let captured_at = std::fs::read(folder.join("run.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).and_then(|n| n.get("captured_at").cloned());
+            let note = std::fs::read(folder.join("run.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+            let captured_at = note.as_ref().and_then(|n| n.get("captured_at").cloned());
+            let (resolution, refresh_hz) = recorder::send::screen(note.as_ref().and_then(|n| n["read_from_this_pc"]["display"].as_str()));
             if game_settings.is_some() {
                 println!("with the game's graphics settings from run.json");
             }
@@ -63,13 +73,16 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        // what Windows says about the largest window of any running program: for trying the reading without the game
+        Some("screen") if args.len() == 2 => println!("{}: {}", args[1], screen_line(&args[1])),
         Some("info") => {
             println!("PresentMon: {}", platform::find_presentmon().map(|p| p.display().to_string()).unwrap_or_else(|| "not found".into()));
             println!("administrator rights: {}", platform::is_elevated());
             println!("Overwatch running: {}", platform::process_running("Overwatch.exe"));
             println!("CPU: {}", platform::cpu_name().unwrap_or_else(|| "not read".into()));
             println!("graphics card: {}", platform::gpu_name().unwrap_or_else(|| "not read".into()));
-            println!("screen: {}", platform::display().unwrap_or_else(|| "not read".into()));
+            println!("main screen: {}", platform::display().unwrap_or_else(|| "not read".into()));
+            println!("the game's window: {}", screen_line("Overwatch.exe"));
             println!("recordings go to: {}", platform::recordings_dir().display());
             println!("the game's settings file: {}", match recorder::settings::read() {
                 Some(v) => format!("read, {} graphics settings, last written {} s ago", v["render"].as_object().map(|o| o.values().filter_map(|s| s.as_object()).map(|s| s.len()).sum::<usize>()).unwrap_or(0), v["file_last_written_s_ago"]),
