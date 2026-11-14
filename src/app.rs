@@ -426,12 +426,15 @@ impl App {
 
         // what was played is asked now, when it is known, not before the match
         label(ui, "This match (optional)");
-        ui.columns(4, |c| {
-            for (i, (name, value)) in [("Map", &mut self.choices.map), ("Mode", &mut self.choices.mode), ("Hero", &mut self.choices.hero), ("Frame limit", &mut self.choices.frame_limit)].into_iter().enumerate() {
-                c[i].label(RichText::new(name).size(11.0).color(MUT));
-                c[i].add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY).char_limit(40));
-            }
-        });
+        // two to a row: four to a row cut a map's name short ("Practice Rang")
+        for pair in [[("Map", &mut self.choices.map), ("Mode", &mut self.choices.mode)], [("Hero", &mut self.choices.hero), ("Frame limit", &mut self.choices.frame_limit)]] {
+            ui.columns(2, |c| {
+                for (i, (name, value)) in pair.into_iter().enumerate() {
+                    c[i].label(RichText::new(name).size(11.0).color(MUT));
+                    c[i].add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY).char_limit(40));
+                }
+            });
+        }
 
         let to = send::target(&self.choices.send_to);
         label(ui, "Will be sent if you press Send");
