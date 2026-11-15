@@ -7,9 +7,12 @@ It is the recording half of FPStick (fpstick.com): FPS and tick, measured in a r
 judges a recording and draws the run page is not in this repository.
 
 Status: beta. It records frame rate performance and, if switched on, game network stats. Inputs are not
-recorded. There is no public run-page server yet, so for now this repository is for reading and building:
-"Send" goes to the address typed into "Send to" on the last screen (a server on your own network, over
-plain http), or, left empty, to a run-page program on the same PC.
+recorded.
+
+"Send" goes to fpstick.com over https, unless another address is typed into "Send to" on the last screen.
+The server's certificate is checked against Mozilla's list of certificate authorities, which is built into
+the program; nothing is sent to a server that cannot show a valid one. Plain http is taken only for a
+server on the same PC or the same home network (addresses such as 192.168.x.x), never across the internet.
 
 Not affiliated with or endorsed by Blizzard Entertainment or Intel. Running software beside a game is your
 own decision under that game's terms; the sections below say exactly what this program reads.
@@ -46,8 +49,9 @@ not install a hook into the mouse's or keyboard's input.
   `udp.csv` and all of `ping.csv` (format FPSN1, described at the top of `framedata/src/net.rs`) and
   sends that with the frames: when each packet passed, which way, how large; when each ping was sent,
   to which router by role, how long the reply took. Packets to other remote ends stay on the PC.
-- `run.json`: when it was recorded, the command that ran, what you typed in, the CPU model, graphics
-  card model and screen mode read from the PC, and the graphics settings from the game's own settings
+- `run.json`: when it was recorded, the command that ran, what you chose (the mode, and the map for a 5v5
+  or 6v6 match or the import code for a custom game), the CPU model, graphics card model, how much memory
+  is fitted and the screen mode read from the PC, and the graphics settings from the game's own settings
   file (`Documents\Overwatch\Settings\Settings_v0.ini`, the sections named "Render"), read when the
   recording starts and again when it ends. Send includes the lines of that section (about 45, such as
   texture detail, effects quality, the frame cap and the window mode), so that runs made at different

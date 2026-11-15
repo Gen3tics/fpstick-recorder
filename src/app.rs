@@ -97,6 +97,14 @@ fn map_list(ui: &mut egui::Ui, map: &mut String, typed: &mut String, opened_now:
     }
 }
 
+/// A server's address as it is said in a sentence: "fpstick.com" for https://fpstick.com, the address as it is for plain http.
+fn shown(t: &send::Target) -> String {
+    match t {
+        send::Target::ThisPc => "this PC".into(),
+        send::Target::Server(base) => base.strip_prefix("https://").unwrap_or(base).to_string(),
+    }
+}
+
 pub struct App {
     choices: Choices,
     view: View,
@@ -613,8 +621,8 @@ impl App {
                         let data = std::fs::read(&o.packed).map_err(|e| format!("The packed file could not be read: {}", e));
                         let result = match (send::target(&c.send_to), data) {
                             (Err(why), _) | (_, Err(why)) => Err(why),
-                            (Ok(None), Ok(data)) => send::send_local(&data, &o.packed.display().to_string(), &label, c.map_said(), &c.mode, "", o.net.is_some()).map(|url| (url.clone(), url)),
-                            (Ok(Some(host)), Ok(data)) => {
+                            (Ok(send::Target::ThisPc), Ok(data)) => send::send_local(&data, &o.packed.display().to_string(), &label, c.map_said(), &c.mode, "", o.net.is_some()).map(|url| (url.clone(), url)),
+                            (Ok(send::Target::Server(host)), Ok(data)) => {
                                 let (resolution, refresh_hz) = send::screen(o.display.as_deref());
                                 let info = serde_json::json!({
                                     "declared": {"map": c.map_said(), "mode": c.mode.trim(), "code": code},
@@ -648,11 +656,12 @@ impl App {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Send to").size(11.0).color(MUT));
-                    ui.add(egui::TextEdit::singleline(&mut self.choices.send_to).hint_text("this PC (127.0.0.1:8765)").desired_width(f32::INFINITY).char_limit(120));
+                    ui.add(egui::TextEdit::singleline(&mut self.choices.send_to).hint_text("fpstick.com").desired_width(f32::INFINITY).char_limit(120));
                 });
                 match &to {
-                    Ok(None) => ui.vertical_centered(|ui| note(ui, "Nothing has left this PC yet. Send goes to the run-page program on this same PC.")),
-                    Ok(Some(host)) => ui.vertical_centered(|ui| note(ui, &format!("Nothing has left this PC yet. Send goes to the run-page server at {}, over plain http.", host))),
+                    Ok(send::Target::ThisPc) => ui.vertical_centered(|ui| note(ui, "Nothing has left this PC yet. Send goes to the run-page program on this same PC and no further.")),
+                    Ok(t @ send::Target::Server(_)) if t.plain() => ui.vertical_centered(|ui| note(ui, &format!("Nothing has left this PC yet. Send goes to the run-page server at {}, a server on your own network, over plain http.", shown(t)))),
+                    Ok(t) => ui.vertical_centered(|ui| note(ui, &format!("Nothing has left this PC yet. Send goes to {} over an encrypted connection.", shown(t)))),
                     Err(why) => ui.vertical_centered(|ui| {
                         ui.label(RichText::new(why).size(12.0).color(AMBER));
                     }),

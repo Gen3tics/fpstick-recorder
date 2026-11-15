@@ -1,9 +1,10 @@
-//! Sends a packed recording. By default it goes to an FPStick run-page program running on this PC
-//! (http://127.0.0.1:8765) and never leaves it. If an address is set, it goes to a run-page server there:
-//! one upload holding what was typed in, what was read from the PC, the frame timing and, if the network
-//! was recorded, when each of the game's packets passed and how large it was. No address is in any of it.
+//! Sends a packed recording. By default it goes to FPStick's run-page server (https://fpstick.com): one upload
+//! holding what was chosen, what was read from the PC, the frame timing and, if the network was recorded, when
+//! each of the game's packets passed and how large it was. No address is in any of it.
 //!
-//! Plain http only so far, which is right for a server on the home network and nowhere else.
+//! Another server can be named. Anywhere on the internet it must be reached over https; plain http is taken
+//! only for a server on the same PC or the same home network, where nobody else is on the way.
+//! "this PC" (or 127.0.0.1:8765) means a run-page program running on this PC; then nothing leaves it.
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -63,20 +64,63 @@ pub fn send_local(packed: &[u8], kept_at: &str, label: &str, map: &str, mode: &s
     Ok(format!("http://{}/#/run/{}", LOCAL, id))
 }
 
-/// Where a typed-in address points: None for the run-page program on this PC, otherwise "host:port".
-pub fn target(typed: &str) -> Result<Option<String>, String> {
+/// FPStick's own run-page server, where a recording goes unless another address is typed in.
+pub const HOME: &str = "https://fpstick.com";
+
+/// Where a recording is sent.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Target {
+    /// A run-page program on this same PC (127.0.0.1:8765). Nothing leaves the PC.
+    ThisPc,
+    /// A run-page server: its address without a path, such as "https://fpstick.com" or "http://192.168.1.20:8770".
+    Server(String),
+}
+
+impl Target {
+    /// Whether the recording crosses a network unprotected: plain http, which is only taken for a home network.
+    pub fn plain(&self) -> bool {
+        matches!(self, Target::Server(base) if base.starts_with("http://"))
+    }
+}
+
+/// Whether a host is this PC or an address of a home network (10.x, 172.16 to 172.31, 192.168.x, 169.254.x, a ".local" name).
+/// Only such a host is sent to over plain http.
+fn is_home(host: &str) -> bool {
+    let name = host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host);
+    if name.eq_ignore_ascii_case("localhost") || name.to_ascii_lowercase().ends_with(".local") {
+        return true; // ".local" names are given out inside a home network only
+    }
+    match name.parse::<std::net::Ipv4Addr>() {
+        Ok(ip) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Err(_) => false,
+    }
+}
+
+/// Where a typed-in address points. Nothing typed: FPStick's own server. A name alone ("example.org") is
+/// reached over https; an address of the home network alone ("192.168.1.20:8770") over plain http.
+pub fn target(typed: &str) -> Result<Target, String> {
     let t = typed.trim().trim_end_matches('/');
     if t.is_empty() {
-        return Ok(None);
+        return Ok(Target::Server(HOME.into()));
     }
-    if t.to_ascii_lowercase().starts_with("https://") {
-        return Err("This version can only send over plain http, to a server on your own network.".into());
+    let low = t.to_ascii_lowercase();
+    let (scheme, host) = match (low.strip_prefix("https://"), low.strip_prefix("http://")) {
+        (Some(h), _) => (Some("https"), h),
+        (_, Some(h)) => (Some("http"), h),
+        _ => (None, low.as_str()),
+    };
+    if host == "this pc" || host == LOCAL || host == "localhost:8765" {
+        return Ok(Target::ThisPc);
     }
-    let host = t.strip_prefix("http://").unwrap_or(t);
-    if host.is_empty() || host.contains(|c: char| c == '/' || c.is_whitespace()) {
-        return Err("That does not look like an address. It should read like http://192.168.1.20:8770".into());
+    let port_ok = |h: &str| h.rsplit_once(':').map(|(n, p)| !n.is_empty() && p.parse::<u16>().is_ok()).unwrap_or(true);
+    if host.is_empty() || !port_ok(host) || !host.chars().all(|c| c.is_ascii_alphanumeric() || ".-:".contains(c)) {
+        return Err("That does not look like an address. It should read like https://fpstick.com, or http://192.168.1.20:8770 for a server at home.".into());
     }
-    Ok(Some(if host.contains(':') { host.to_string() } else { format!("{}:80", host) }))
+    match (scheme, is_home(host)) {
+        (Some("http"), false) => Err("Over plain http a recording is only sent to a server on your own network. For any other, the address must begin with https://".into()),
+        (Some("https"), _) | (None, false) => Ok(Target::Server(format!("https://{}", host))),
+        _ => Ok(Target::Server(format!("http://{}", host))),
+    }
 }
 
 /// The screen as the recorder reads it ("2560 x 1440 at 360 Hz") cut into resolution and refresh rate.
@@ -125,25 +169,85 @@ pub struct Kept {
     pub delete_key: String,
 }
 
-/// Sends one recording to a run-page server at `host` ("192.168.1.20:8770").
-pub fn send_server(host: &str, packed: &[u8], info: &serde_json::Value, net: Option<&[u8]>) -> Result<Kept, String> {
-    let v = post_to(host, "/api/upload", "application/octet-stream", &upload_body(info, packed, net), Duration::from_secs(120))?;
+/// Sends one recording to the run-page server at `base` ("https://fpstick.com", "http://192.168.1.20:8770").
+/// Over https the server's certificate is checked against Mozilla's list of certificate authorities, which is
+/// built into this program; a server that cannot show a valid one is not sent to.
+pub fn send_server(base: &str, packed: &[u8], info: &serde_json::Value, net: Option<&[u8]>) -> Result<Kept, String> {
+    let body = upload_body(info, packed, net);
+    // a whole match is about 20 MB: ten minutes covers a slow line out and the server's judging
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_global(Some(Duration::from_secs(600)))
+        .http_status_as_error(false) // a refusal comes with words of its own, which are passed on
+        .max_redirects(0) // a recording goes to the address that was named and nowhere else
+        .user_agent(concat!("FPStick-Recorder/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .into();
+    let mut reply = agent.post(format!("{}/api/upload", base)).header("Content-Type", "application/octet-stream").send(&body[..]).map_err(|e| said(&e, base))?;
+    let status = reply.status().as_u16();
+    let text = reply.body_mut().with_config().limit(64 * 1024).read_to_string().unwrap_or_default();
+    let v: serde_json::Value = serde_json::from_str(text.trim()).unwrap_or(serde_json::Value::Null);
+    if status != 200 {
+        // the server says why in plain words; something on the way to it (a proxy's own page) does not
+        return Err(match (v["error"].as_str(), status) {
+            (Some(why), _) => why.to_string(),
+            (None, 413) => "The recording is too large to send.".to_string(),
+            (None, 300..=399) => format!("{} sent the recording on to another address, and it was not followed.", base),
+            (None, 500..=599) => format!("The server at {} could not be reached or is not answering right now (answer {}). Try again in a moment; the recording is kept on this PC.", base, status),
+            (None, _) => format!("{} refused the recording (answer {}).", base, status),
+        });
+    }
     let (path, key) = (v["url"].as_str().ok_or("The answer had no run page in it.")?, v["delete_key"].as_str().unwrap_or(""));
-    if !path.starts_with("/r/") {
+    if !path.starts_with("/r/") || path.len() > 64 || !path[3..].chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err("The answer had no run page in it.".into());
     }
-    Ok(Kept { page: format!("http://{}{}", host, path), delete_key: key.to_string() })
+    Ok(Kept { page: format!("{}{}", base, path), delete_key: key.to_string() })
+}
+
+/// What went wrong on the way to the server, in plain words.
+fn said(e: &ureq::Error, base: &str) -> String {
+    use ureq::Error as E;
+    match e {
+        E::HostNotFound => format!("The address {} could not be found. Check the spelling and that this PC is online.", base),
+        E::ConnectionFailed => NO_ANSWER.to_string(),
+        E::Timeout(_) => format!("{} took too long. The recording is kept on this PC; try again.", base),
+        E::Tls(_) | E::Rustls(_) | E::TlsRequired => format!("The connection to {} could not be secured ({}), so nothing was sent.", base, e),
+        E::Io(io) if matches!(io.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::TimedOut) => NO_ANSWER.to_string(),
+        E::Io(io) => format!("{} could not be reached ({}). Check the address and that this PC is online.", base, io),
+        _ => format!("Sending failed: {}", e),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn addresses_and_screens_are_read() {
-        use super::{screen, target};
-        assert_eq!(target("  "), Ok(None));
-        assert_eq!(target("http://192.168.1.20:8770/"), Ok(Some("192.168.1.20:8770".into())));
-        assert_eq!(target("pi.local"), Ok(Some("pi.local:80".into())));
-        assert!(target("https://example.org").is_err() && target("http://a b").is_err() && target("http://a/b").is_err());
+        use super::{screen, target, Target};
+        let server = |a: &str| Ok(Target::Server(a.to_string()));
+        // nothing typed: FPStick's own server, over https
+        assert_eq!(target("  "), server("https://fpstick.com"));
+        assert_eq!(target("https://fpstick.com/"), server("https://fpstick.com"));
+        assert_eq!(target("HTTPS://Example.org:8443"), server("https://example.org:8443"));
+        // a name alone is reached over https; a home address alone over plain http
+        assert_eq!(target("example.org"), server("https://example.org"));
+        assert_eq!(target("192.168.1.20:8770"), server("http://192.168.1.20:8770"));
+        assert_eq!(target("http://192.168.1.20:8770/"), server("http://192.168.1.20:8770"));
+        assert_eq!(target("http://10.0.0.5"), server("http://10.0.0.5"));
+        assert_eq!(target("pi.local:8770"), server("http://pi.local:8770"));
+        assert_eq!(target("https://192.168.1.20"), server("https://192.168.1.20"));
+        assert!(target("http://192.168.1.20:8770").unwrap().plain() && !target("").unwrap().plain() && !Target::ThisPc.plain());
+        // plain http never leaves the home network
+        for away in ["http://example.org", "http://fpstick.com", "http://8.8.8.8:80", "http://172.32.0.1", "http://192.169.1.1"] {
+            assert!(target(away).unwrap_err().contains("https://"), "{}", away);
+        }
+        // the run-page program on this same PC
+        for here in ["this pc", "This PC", "127.0.0.1:8765", "http://127.0.0.1:8765", "localhost:8765"] {
+            assert_eq!(target(here), Ok(Target::ThisPc), "{}", here);
+        }
+        assert_eq!(target("127.0.0.1:8770"), server("http://127.0.0.1:8770"));
+        for odd in ["http://a b", "https://a/b", "https://", "a:b", "exa mple.org", "https://user@example.org", "example.org:99999", "x?y"] {
+            assert!(target(odd).is_err(), "{}", odd);
+        }
         assert_eq!(screen(Some("2560 x 1440 at 360 Hz")), (Some("2560 x 1440".into()), Some("360".into())));
         assert_eq!(screen(None), (None, None));
     }

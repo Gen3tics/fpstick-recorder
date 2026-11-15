@@ -52,7 +52,11 @@ fn main() {
             // a recording made before 15 Nov 2026 may also hold a hero and a frame limit that were typed in then
             let declared = serde_json::json!({"map": typed("map"), "mode": typed("mode"), "code": typed("code"), "hero": typed("hero"), "limit_fps": typed("frame_limit")});
             let info = serde_json::json!({"declared": declared, "read": {"cpu": platform::cpu_name(), "gpu": platform::gpu_name(), "memory": platform::memory(), "resolution": resolution, "refresh_hz": refresh_hz}, "captured_at": captured_at, "game_settings": game_settings});
-            let sent = recorder::send::target(&args[3]).and_then(|t| t.ok_or_else(|| "Give an address after --to.".to_string())).and_then(|host| {
+            let to = recorder::send::target(&args[3]).and_then(|t| match t {
+                recorder::send::Target::Server(base) => Ok(base),
+                recorder::send::Target::ThisPc => Err("Give a server's address after --to, such as https://fpstick.com".to_string()),
+            });
+            let sent = to.and_then(|host| {
                 std::fs::read(&args[1]).map_err(|e| e.to_string()).and_then(|d| {
                     // the network timing recorded beside it goes along, if there is any
                     let net = recorder::send::network_block(std::path::Path::new(&args[1]), &d);
