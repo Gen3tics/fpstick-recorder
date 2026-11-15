@@ -7,6 +7,7 @@
 pub use framedata::{frames, pack};
 
 pub mod config;
+pub mod maps;
 pub mod modes;
 pub mod net;
 pub mod platform;

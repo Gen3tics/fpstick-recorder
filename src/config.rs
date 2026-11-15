@@ -41,8 +41,6 @@ pub struct Choices {
     pub hold_to_stop: bool,
     pub map: String,
     pub mode: String,
-    pub hero: String,
-    pub frame_limit: String,
     pub process: String,
     /// Where Send goes. Empty: the run-page program on this PC. Otherwise the address of a run-page server,
     /// such as http://192.168.1.20:8770.
@@ -60,8 +58,6 @@ impl Default for Choices {
             hold_to_stop: true,
             map: String::new(),
             mode: String::new(),
-            hero: String::new(),
-            frame_limit: String::new(),
             process: "Overwatch.exe".into(),
             send_to: String::new(),
         }

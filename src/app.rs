@@ -33,6 +33,70 @@ enum View {
     Failed(String),
 }
 
+/// The open map list: a search line, then every map by its kind of match in two columns. With something typed,
+/// the maps that fit it, best first; Enter takes the first. A map that is not listed (newer than this recorder)
+/// can be kept as it was typed.
+fn map_list(ui: &mut egui::Ui, map: &mut String, typed: &mut String, opened_now: bool) {
+    use recorder::maps::{self, Kind};
+    ui.set_min_width(372.0);
+    let search = ui.add(egui::TextEdit::singleline(typed).hint_text("Type a few letters, Enter takes the first").desired_width(f32::INFINITY).char_limit(40));
+    // The cursor stays in the search line for as long as the list is open: letters typed at any moment find a map,
+    // and Enter never lands on the button that opened the list (which would shut it).
+    if opened_now || !search.has_focus() {
+        search.request_focus();
+    }
+    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter)); // the cursor is always in the search line while this is open
+    let wanted = typed.trim().to_string();
+    let mut pick: Option<String> = None;
+    ui.add_space(4.0);
+    ui.spacing_mut().item_spacing = Vec2::new(8.0, 1.0); // tight rows: all 31 maps without scrolling
+    ui.spacing_mut().button_padding = Vec2::new(8.0, 3.0);
+    if wanted.is_empty() {
+        ui.columns(2, |c| {
+            for (i, kinds) in [[Kind::Control, Kind::Push, Kind::Flashpoint].as_slice(), [Kind::Escort, Kind::Hybrid].as_slice()].into_iter().enumerate() {
+                for kind in kinds {
+                    c[i].label(RichText::new(kind.name().to_uppercase()).size(10.5).color(MUT));
+                    for m in maps::MAPS.iter().filter(|m| m.kind == *kind) {
+                        if c[i].selectable_label(map.trim() == m.name, m.name).clicked() {
+                            pick = Some(m.name.to_string());
+                        }
+                    }
+                    c[i].add_space(7.0);
+                }
+            }
+        });
+        if !map.trim().is_empty() && ui.selectable_label(false, RichText::new("Not said").color(MUT)).clicked() {
+            pick = Some(String::new());
+        }
+    } else {
+        let found = maps::matching(&wanted);
+        for (i, m) in found.iter().enumerate() {
+            let line = ui.horizontal(|ui| {
+                let r = ui.selectable_label(i == 0, m.name);
+                ui.label(RichText::new(m.kind.name()).size(11.0).color(MUT));
+                r
+            });
+            if line.inner.clicked() || (i == 0 && enter) {
+                pick = Some(m.name.to_string());
+            }
+        }
+        if found.is_empty() {
+            ui.label(RichText::new("Not one of the listed maps.").size(12.0).color(MUT));
+            if ui.selectable_label(true, format!("Keep \u{201c}{}\u{201d} as typed", wanted)).clicked() || enter {
+                pick = Some(wanted);
+            }
+        }
+    }
+    match pick {
+        Some(p) => {
+            *map = p;
+            typed.clear();
+            ui.close();
+        }
+        None => {}
+    }
+}
+
 pub struct App {
     choices: Choices,
     view: View,
@@ -43,6 +107,9 @@ pub struct App {
     go: bool,
     /// Redraw without pause (`--show spin`): gives PresentMon something to record when testing without a game.
     spin: bool,
+    /// What has been typed into the map list to find a map, and whether that list was open in the last frame.
+    map_typed: String,
+    map_open: bool,
 }
 
 impl App {
@@ -66,8 +133,9 @@ impl App {
         cc.egui_ctx.all_styles_mut(|s| {
             s.spacing.item_spacing = Vec2::new(8.0, 7.0);
             s.spacing.button_padding = Vec2::new(10.0, 6.0);
+            s.spacing.default_area_size.y = 720.0; // room for the map list to show every map at once
         });
-        let mut app = App { choices: Choices::load(), view: View::Setup, choosing_key: false, show_command: false, note: None, go, spin: matches!(show, Some("spin") | Some("spin-net")) };
+        let mut app = App { choices: Choices::load(), view: View::Setup, choosing_key: false, show_command: false, note: None, go, spin: matches!(show, Some("spin") | Some("spin-net")), map_typed: String::new(), map_open: false };
         if show == Some("spin-net") {
             // for testing the network record without a game: 64 times a second, a small packet to an address set
             // aside for documentation (192.0.2.1), which no machine has, and a larger one to this program itself,
@@ -93,7 +161,7 @@ impl App {
 
     /// Puts the window into one of its states with made-up content, without recording anything (`--show STATE`).
     fn show(&mut self, state: &str) {
-        self.choices = Choices { map: "King's Row".into(), mode: "Quick Play 6v6".into(), hero: "Sojourn".into(), frame_limit: "320".into(), ..Choices::default() };
+        self.choices = Choices { map: "King's Row".into(), mode: "Quick Play 6v6".into(), ..Choices::default() };
         let exe = "C:\\Program Files\\Intel\\PresentMon\\PresentMonConsoleApplication\\PresentMon-2.6.0-x64.exe";
         let folder = std::path::PathBuf::from("C:\\Users\\you\\Documents\\Recorder\\2026-11-11_164713");
         let command = presentmon::shown(exe, &presentmon::record_args("Overwatch.exe", &folder.join("frames.csv"), None));
@@ -438,6 +506,8 @@ impl App {
             };
             let width = c[0].available_width();
             egui::ComboBox::from_id_salt("mode").selected_text(shown).width(width).height(460.0).show_ui(&mut c[0], |ui| {
+                ui.spacing_mut().item_spacing.y = 1.0; // tight rows: every mode without scrolling
+                ui.spacing_mut().button_padding = Vec2::new(8.0, 3.0);
                 ui.selectable_value(&mut self.choices.mode, String::new(), RichText::new("Not said").color(MUT));
                 let mut family = None;
                 for m in modes::MODES.iter() {
@@ -445,25 +515,34 @@ impl App {
                         ui.separator(); // one group for each tab of the game's Play menu
                         family = Some(m.family);
                     }
-                    ui.selectable_value(&mut self.choices.mode, m.name.to_string(), RichText::new(m.name).color(colour(m.family)));
+                    // the chosen row is filled with the highlight colour, where the family's colour would not read
+                    let text = if self.choices.mode == m.name { RichText::new(m.name) } else { RichText::new(m.name).color(colour(m.family)) };
+                    ui.selectable_value(&mut self.choices.mode, m.name.to_string(), text);
                 }
             });
+            c[1].label(RichText::new("Map").size(11.0).color(MUT));
             if modes::has_map(&self.choices.mode) {
-                let custom = chosen.map(|m| m.family == modes::Family::Custom).unwrap_or(false);
-                c[1].label(RichText::new(if custom { "Map or code" } else { "Map" }).size(11.0).color(MUT));
-                c[1].add(egui::TextEdit::singleline(&mut self.choices.map).desired_width(f32::INFINITY).char_limit(40));
+                // One click opens every map of the 5v5 and 6v6 queues at once, in the game's kinds of match; a
+                // second click takes one. Or a few letters and Enter: the list opens with the cursor in its
+                // search line (Luka, 15 Nov 2026: as easy as it can be made).
+                let said = self.choices.map.trim().to_string();
+                let shown = if said.is_empty() { RichText::new("Choose the map").color(MUT) } else { RichText::new(said) };
+                let (width, opened_now) = (c[1].available_width(), !self.map_open);
+                let (map, typed) = (&mut self.choices.map, &mut self.map_typed);
+                let list = egui::ComboBox::from_id_salt("map").selected_text(shown).width(width).height(660.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show_ui(&mut c[1], |ui| map_list(ui, map, typed, opened_now));
+                self.map_open = list.inner.is_some();
+                if !self.map_open {
+                    self.map_typed.clear();
+                }
             } else {
-                c[1].label(RichText::new("Map").size(11.0).color(MUT));
+                self.map_open = false;
                 c[1].add_space(5.0);
-                c[1].label(RichText::new("No map to name in this mode").size(13.0).color(MUT));
+                c[1].label(RichText::new(if chosen.is_some() { "Asked for 5v5 and 6v6 only" } else { "Choose the mode first" }).size(13.0).color(MUT));
             }
         });
-        ui.columns(2, |c| {
-            for (i, (name, value)) in [("Hero", &mut self.choices.hero), ("Frame limit", &mut self.choices.frame_limit)].into_iter().enumerate() {
-                c[i].label(RichText::new(name).size(11.0).color(MUT));
-                c[i].add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY).char_limit(40));
-            }
-        });
+        // Hero and frame limit are no longer asked (Luka, 15 Nov 2026: they confuse more than they add; choices
+        // saved with them are still read, the two are dropped). A frame limit set in the game is still read from
+        // the game's own settings file.
 
         let to = send::target(&self.choices.send_to);
         label(ui, "Will be sent if you press Send");
@@ -498,7 +577,7 @@ impl App {
         if o.game_settings.is_some() {
             item(ui, true, "Your Overwatch graphics settings, to make comparisons fair".into());
         }
-        item(ui, true, "What you chose and typed in: mode, map, hero, frame limit".into());
+        item(ui, true, "What you chose: mode and map".into());
         if let Some(why) = &o.net_note {
             ui.label(RichText::new(format!("No network stats: {}", why)).size(13.0).color(AMBER));
         }
@@ -524,15 +603,15 @@ impl App {
                     *sent.lock().unwrap() = Sent::Sending;
                     let (sent, ctx, o, c) = (sent.clone(), ui.ctx().clone(), o.clone(), self.choices.clone());
                     std::thread::spawn(move || {
-                        let label = [c.map_said(), c.mode.as_str(), c.hero.as_str()].iter().filter(|s| !s.trim().is_empty()).cloned().collect::<Vec<_>>().join(", ");
+                        let label = [c.map_said(), c.mode.as_str()].iter().filter(|s| !s.trim().is_empty()).cloned().collect::<Vec<_>>().join(", ");
                         let data = std::fs::read(&o.packed).map_err(|e| format!("The packed file could not be read: {}", e));
                         let result = match (send::target(&c.send_to), data) {
                             (Err(why), _) | (_, Err(why)) => Err(why),
-                            (Ok(None), Ok(data)) => send::send_local(&data, &o.packed.display().to_string(), &label, c.map_said(), &c.mode, &c.frame_limit, o.net.is_some()).map(|url| (url.clone(), url)),
+                            (Ok(None), Ok(data)) => send::send_local(&data, &o.packed.display().to_string(), &label, c.map_said(), &c.mode, "", o.net.is_some()).map(|url| (url.clone(), url)),
                             (Ok(Some(host)), Ok(data)) => {
                                 let (resolution, refresh_hz) = send::screen(o.display.as_deref());
                                 let info = serde_json::json!({
-                                    "declared": {"map": c.map_said(), "mode": c.mode.trim(), "hero": c.hero.trim(), "limit_fps": c.frame_limit.trim()},
+                                    "declared": {"map": c.map_said(), "mode": c.mode.trim()},
                                     "read": {"cpu": o.cpu, "gpu": o.gpu, "memory": o.memory, "resolution": resolution, "refresh_hz": refresh_hz},
                                     "captured_at": o.captured_at,
                                     "game_settings": o.game_settings,

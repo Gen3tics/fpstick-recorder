@@ -49,6 +49,7 @@ fn main() {
             }
             // what was typed in on the Done screen when the recording was made is in run.json too
             let typed = |k: &str| note.as_ref().and_then(|n| n["scene"][k].as_str()).map(|v| v.trim().to_string()).unwrap_or_default();
+            // a recording made before 15 Nov 2026 may also hold a hero and a frame limit that were typed in then
             let declared = serde_json::json!({"map": typed("map"), "mode": typed("mode"), "hero": typed("hero"), "limit_fps": typed("frame_limit")});
             let info = serde_json::json!({"declared": declared, "read": {"cpu": platform::cpu_name(), "gpu": platform::gpu_name(), "memory": platform::memory(), "resolution": resolution, "refresh_hz": refresh_hz}, "captured_at": captured_at, "game_settings": game_settings});
             let sent = recorder::send::target(&args[3]).and_then(|t| t.ok_or_else(|| "Give an address after --to.".to_string())).and_then(|host| {

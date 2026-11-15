@@ -278,7 +278,7 @@ fn run(c: &Choices, seconds: Option<u64>, exe: &Path, root: &Path, stop: &Atomic
     };
     let note = serde_json::json!({
         "recorder": env!("CARGO_PKG_VERSION"), "captured_at": out.captured_at, "command": shown,
-        "scene": {"map": c.map, "mode": c.mode, "hero": c.hero, "frame_limit": c.frame_limit},
+        "scene": {"map": c.map_said(), "mode": c.mode},
         "read_from_this_pc": {"cpu": out.cpu, "gpu": out.gpu, "memory": out.memory, "display": out.display, "game_window": screen.as_ref().map(|(s, at)| s.note(at)), "main_screen": platform::display()},
         "frames": frames, "recorded_s": recorded_s,
         "network": out.net.as_ref().map(|n| serde_json::json!({"packets": n.datagrams, "remote_ends": n.flows, "route_pings_asked_for": n.pings_asked, "pings": n.probes, "routers_pinged": n.hops, "events_lost": n.events_lost})),
@@ -297,11 +297,11 @@ pub fn save_sent(folder: &Path, page: &str, delete_key: &str) {
     let _ = std::fs::write(file, serde_json::to_vec_pretty(&note).unwrap_or_default());
 }
 
-/// Writes what the person typed in after the match (map, mode, hero, frame limit) into the recording's run.json.
+/// Writes what the person chose after the match (mode and map) into the recording's run.json.
 pub fn save_scene(folder: &Path, c: &Choices) {
     let file = folder.join("run.json");
     let Ok(mut note) = std::fs::read(&file).map_err(|_| ()).and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).map_err(|_| ())) else { return };
-    note["scene"] = serde_json::json!({"map": c.map_said(), "mode": c.mode, "hero": c.hero, "frame_limit": c.frame_limit});
+    note["scene"] = serde_json::json!({"map": c.map_said(), "mode": c.mode});
     let _ = std::fs::write(file, serde_json::to_vec_pretty(&note).unwrap_or_default());
 }
 
