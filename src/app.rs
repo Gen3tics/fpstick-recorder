@@ -102,7 +102,7 @@ impl App {
             "countdown" => still(Phase::Countdown, 3.2),
             "recording" => still(Phase::Recording, 0.0),
             "finishing" => still(Phase::Finishing, 557.0),
-            "done" => View::Done(Outcome { game_settings: Some(serde_json::json!({"section": "Render.13", "values": {"TextureDetail": "1"}, "changed_while_recording": false})), packed: folder.join("frames.fpsf"), folder, recording_bytes: 38_300_000, packed_bytes: 6_310_000, frames: 167_865, recorded_s: 557.0, captured_at: "2026-11-11T16:47:13".into(), cpu: Some("AMD Ryzen 7 9850X3D 8-Core Processor".into()), gpu: Some("NVIDIA GeForce RTX 5090".into()), display: Some("2560 x 1440 at 360 Hz".into()), net: Some(recorder::net::NetSummary { datagrams: 106_512, received: 35_310, sent: 35_600, flows: 3, flow1_share: 0.666, probes: 8_340, hops: vec!["router", "isp", "edge"], pings_asked: true, events_lost: 0, ipv6: 0 }), net_note: None }, Arc::new(Mutex::new(Sent::No))),
+            "done" => View::Done(Outcome { game_settings: Some(serde_json::json!({"section": "Render.13", "values": {"TextureDetail": "1"}, "changed_while_recording": false})), packed: folder.join("frames.fpsf"), folder, recording_bytes: 38_300_000, packed_bytes: 6_310_000, frames: 167_865, recorded_s: 557.0, captured_at: "2026-11-11T16:47:13".into(), cpu: Some("AMD Ryzen 7 9850X3D 8-Core Processor".into()), gpu: Some("NVIDIA GeForce RTX 5090".into()), memory: Some("32 GB RAM".into()), display: Some("2560 x 1440 at 360 Hz".into()), net: Some(recorder::net::NetSummary { datagrams: 106_512, received: 35_310, sent: 35_600, flows: 3, flow1_share: 0.666, probes: 8_340, hops: vec!["router", "isp", "edge"], pings_asked: true, events_lost: 0, ipv6: 0 }), net_note: None }, Arc::new(Mutex::new(Sent::No))),
             "failed" => View::Failed("Overwatch is not running. Start the game, then press Record again.".into()),
             "command" => {
                 self.show_command = true;
@@ -302,7 +302,7 @@ impl App {
         });
         note(ui, &format!("It also stops after {} minutes, or when the game closes.", config::CAP_S / 60));
 
-        note(ui, "Also read from this PC when a recording ends: the CPU and graphics card model and the screen's mode.");
+        note(ui, "Also read from this PC when a recording ends: the CPU and graphics card model, how much memory is fitted, and the screen's mode.");
 
         ui.add_space(8.0);
         let record = primary(ui, "    Record");
@@ -480,7 +480,7 @@ impl App {
             });
         };
         item(ui, true, format!("Frame timing, packed: {}", size(o.packed_bytes)));
-        let parts: Vec<String> = [o.cpu.clone(), o.gpu.clone(), o.display.clone()].into_iter().flatten().collect();
+        let parts: Vec<String> = [o.cpu.clone(), o.gpu.clone(), o.memory.clone(), o.display.clone()].into_iter().flatten().collect();
         if !parts.is_empty() {
             item(ui, true, format!("Read from this PC: {}", parts.join(" · ")));
         }
@@ -533,7 +533,7 @@ impl App {
                                 let (resolution, refresh_hz) = send::screen(o.display.as_deref());
                                 let info = serde_json::json!({
                                     "declared": {"map": c.map_said(), "mode": c.mode.trim(), "hero": c.hero.trim(), "limit_fps": c.frame_limit.trim()},
-                                    "read": {"cpu": o.cpu, "gpu": o.gpu, "resolution": resolution, "refresh_hz": refresh_hz},
+                                    "read": {"cpu": o.cpu, "gpu": o.gpu, "memory": o.memory, "resolution": resolution, "refresh_hz": refresh_hz},
                                     "captured_at": o.captured_at,
                                     "game_settings": o.game_settings,
                                 });

@@ -50,7 +50,7 @@ fn main() {
             // what was typed in on the Done screen when the recording was made is in run.json too
             let typed = |k: &str| note.as_ref().and_then(|n| n["scene"][k].as_str()).map(|v| v.trim().to_string()).unwrap_or_default();
             let declared = serde_json::json!({"map": typed("map"), "mode": typed("mode"), "hero": typed("hero"), "limit_fps": typed("frame_limit")});
-            let info = serde_json::json!({"declared": declared, "read": {"cpu": platform::cpu_name(), "gpu": platform::gpu_name(), "resolution": resolution, "refresh_hz": refresh_hz}, "captured_at": captured_at, "game_settings": game_settings});
+            let info = serde_json::json!({"declared": declared, "read": {"cpu": platform::cpu_name(), "gpu": platform::gpu_name(), "memory": platform::memory(), "resolution": resolution, "refresh_hz": refresh_hz}, "captured_at": captured_at, "game_settings": game_settings});
             let sent = recorder::send::target(&args[3]).and_then(|t| t.ok_or_else(|| "Give an address after --to.".to_string())).and_then(|host| {
                 std::fs::read(&args[1]).map_err(|e| e.to_string()).and_then(|d| {
                     // the network timing recorded beside it goes along, if there is any
@@ -84,6 +84,7 @@ fn main() {
             println!("Overwatch running: {}", platform::process_running("Overwatch.exe"));
             println!("CPU: {}", platform::cpu_name().unwrap_or_else(|| "not read".into()));
             println!("graphics card: {}", platform::gpu_name().unwrap_or_else(|| "not read".into()));
+            println!("memory: {}", platform::memory().unwrap_or_else(|| "not read".into()));
             println!("main screen: {}", platform::display().unwrap_or_else(|| "not read".into()));
             println!("the game's window: {}", screen_line("Overwatch.exe"));
             println!("recordings go to: {}", platform::recordings_dir().display());

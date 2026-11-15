@@ -84,6 +84,16 @@ pub fn pick_screen(start: Option<GameScreen>, end: Option<GameScreen>) -> Option
     }
 }
 
+/// A memory size as a person says it, in whole gigabytes: "16 GB RAM", "32 GB RAM".
+pub fn memory_shown(kb: u64) -> String {
+    format!("{} GB RAM", (kb as f64 / 1_048_576.0).round().max(1.0) as u64)
+}
+
+/// The memory fitted in this PC, such as "32 GB RAM".
+pub fn memory() -> Option<String> {
+    imp::memory_kb().map(memory_shown)
+}
+
 #[cfg(windows)]
 mod imp {
     use super::GameScreen;
@@ -96,7 +106,7 @@ mod imp {
     use windows_sys::Win32::System::Diagnostics::Debug::Beep;
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
     use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
-    use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+    use windows_sys::Win32::System::SystemInformation::{GetLocalTime, GetPhysicallyInstalledSystemMemory, GlobalMemoryStatusEx, MEMORYSTATUSEX};
     use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, WaitForSingleObject, THREAD_PRIORITY_LOWEST};
     use windows_sys::Win32::UI::HiDpi::{SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
@@ -149,6 +159,18 @@ mod imp {
         let mut size = (buf.len() * 2) as u32;
         let rc = unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, key.as_ptr(), val.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buf.as_mut_ptr() as *mut _, &mut size) };
         (rc == 0).then(|| text(&buf)).filter(|s| !s.is_empty())
+    }
+
+    /// The memory fitted in this PC, in kilobytes, as its firmware reports it. Where the firmware's tables cannot be read,
+    /// the memory Windows can use, which is a little less.
+    pub fn memory_kb() -> Option<u64> {
+        let mut kb = 0u64;
+        if unsafe { GetPhysicallyInstalledSystemMemory(&mut kb) } != 0 && kb > 0 {
+            return Some(kb);
+        }
+        let mut m: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        (unsafe { GlobalMemoryStatusEx(&mut m) } != 0 && m.ullTotalPhys > 0).then(|| m.ullTotalPhys / 1024)
     }
 
     /// The graphics card the main screen is plugged into.
@@ -325,6 +347,9 @@ mod imp {
     pub fn gpu_name() -> Option<String> {
         None
     }
+    pub fn memory_kb() -> Option<u64> {
+        None
+    }
     pub fn display() -> Option<String> {
         None
     }
@@ -384,6 +409,8 @@ mod tests {
         assert_eq!(pick_screen(Some(windowed.clone()), Some(windowed.clone())), Some((windowed.clone(), "start")));
         assert_eq!(pick_screen(None, Some(windowed.clone())), Some((windowed.clone(), "end")));
         assert_eq!(pick_screen(None, None), None);
+        // the firmware gives kilobytes; a PC whose firmware cannot be read gives a little less than is fitted
+        assert_eq!((memory_shown(8 * 1_048_576), memory_shown(33_554_432), memory_shown(33_455_000), memory_shown(134_217_728)), ("8 GB RAM".into(), "32 GB RAM".into(), "32 GB RAM".into(), "128 GB RAM".into()));
         assert_eq!(windowed.shown(), "1584 x 821 at 360 Hz");
         assert_eq!(crate::send::screen(Some(&windowed.shown())), (Some("1584 x 821".to_string()), Some("360".to_string())));
         let note = windowed.note("start");

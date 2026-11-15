@@ -31,6 +31,8 @@ pub struct Outcome {
     pub captured_at: String,
     pub cpu: Option<String>,
     pub gpu: Option<String>,
+    /// The memory fitted in the PC, such as "32 GB RAM".
+    pub memory: Option<String>,
     pub display: Option<String>,
     /// What the network record holds, if one was asked for and the game was on a server.
     pub net: Option<NetSummary>,
@@ -271,12 +273,13 @@ fn run(c: &Choices, seconds: Option<u64>, exe: &Path, root: &Path, stop: &Atomic
         captured_at,
         cpu: platform::cpu_name(),
         gpu: platform::gpu_name(),
+        memory: platform::memory(),
         display: screen.as_ref().map(|(s, _)| s.shown()),
     };
     let note = serde_json::json!({
         "recorder": env!("CARGO_PKG_VERSION"), "captured_at": out.captured_at, "command": shown,
         "scene": {"map": c.map, "mode": c.mode, "hero": c.hero, "frame_limit": c.frame_limit},
-        "read_from_this_pc": {"cpu": out.cpu, "gpu": out.gpu, "display": out.display, "game_window": screen.as_ref().map(|(s, at)| s.note(at)), "main_screen": platform::display()},
+        "read_from_this_pc": {"cpu": out.cpu, "gpu": out.gpu, "memory": out.memory, "display": out.display, "game_window": screen.as_ref().map(|(s, at)| s.note(at)), "main_screen": platform::display()},
         "frames": frames, "recorded_s": recorded_s,
         "network": out.net.as_ref().map(|n| serde_json::json!({"packets": n.datagrams, "remote_ends": n.flows, "route_pings_asked_for": n.pings_asked, "pings": n.probes, "routers_pinged": n.hops, "events_lost": n.events_lost})),
         "network_note": out.net_note,
