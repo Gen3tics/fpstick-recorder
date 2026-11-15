@@ -213,6 +213,10 @@ fn said(e: &ureq::Error, base: &str) -> String {
         E::Timeout(_) => format!("{} took too long. The recording is kept on this PC; try again.", base),
         E::Tls(_) | E::Rustls(_) | E::TlsRequired => format!("The connection to {} could not be secured ({}), so nothing was sent.", base, e),
         E::Io(io) if matches!(io.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::TimedOut) => NO_ANSWER.to_string(),
+        // a certificate that does not hold arrives as an input/output failure with the reason inside (seen on Windows, 15 Nov 2026)
+        E::Io(io) if ["certificate", "handshake", "tls"].iter().any(|w| io.to_string().to_ascii_lowercase().contains(w)) => {
+            format!("The connection to {} could not be secured ({}), so nothing was sent.", base, io)
+        }
         E::Io(io) => format!("{} could not be reached ({}). Check the address and that this PC is online.", base, io),
         _ => format!("Sending failed: {}", e),
     }
