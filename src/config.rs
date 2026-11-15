@@ -41,6 +41,8 @@ pub struct Choices {
     pub hold_to_stop: bool,
     pub map: String,
     pub mode: String,
+    /// A custom game's import code. Kept from one recording to the next: the same code is played again and again.
+    pub code: String,
     pub process: String,
     /// Where Send goes. Empty: the run-page program on this PC. Otherwise the address of a run-page server,
     /// such as http://192.168.1.20:8770.
@@ -58,6 +60,7 @@ impl Default for Choices {
             hold_to_stop: true,
             map: String::new(),
             mode: String::new(),
+            code: String::new(),
             process: "Overwatch.exe".into(),
             send_to: String::new(),
         }
@@ -102,6 +105,11 @@ impl Choices {
     /// The map to say for this recording: none in a mode that has no map to name, whatever was typed earlier.
     pub fn map_said(&self) -> &str {
         if crate::modes::has_map(&self.mode) { self.map.trim() } else { "" }
+    }
+
+    /// The import code to say for this recording: only for a custom game.
+    pub fn code_said(&self) -> String {
+        if crate::modes::has_code(&self.mode) { crate::modes::code_shown(&self.code) } else { String::new() }
     }
 
     pub fn save(&self) {

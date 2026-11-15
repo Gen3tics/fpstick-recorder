@@ -69,6 +69,17 @@ pub fn has_map(name: &str) -> bool {
     find(name).map(|m| m.map).unwrap_or(false)
 }
 
+/// Whether a recording in this mode is named by an import code: a custom game, which is started from one
+/// (VAXTA, the aim trainer nearly every player knows; or a player's own).
+pub fn has_code(name: &str) -> bool {
+    find(name).map(|m| m.family == Family::Custom).unwrap_or(false)
+}
+
+/// An import code as the game writes it: capital letters and digits, at most eight.
+pub fn code_shown(typed: &str) -> String {
+    typed.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()).take(8).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,6 +92,8 @@ mod tests {
         }
         assert!(has_map("Quick Play 5v5") && has_map("Quick Play 6v6") && has_map("Competitive 5v5") && has_map("Competitive 6v6"));
         assert_eq!(MODES.iter().filter(|m| m.map).count(), 4);
+        assert!(has_code("Custom game") && !has_code("Competitive 5v5") && !has_code(""));
+        assert_eq!((code_shown(" vaxta "), code_shown("eat-xtt"), code_shown("abcdefghijk"), code_shown("é!")), ("VAXTA".into(), "EATXTT".into(), "ABCDEFGH".into(), String::new()));
         assert!(!has_map("Stadium Competitive") && !has_map("Custom game") && !has_map("Mystery Heroes") && !has_map("") && !has_map("6v6 comp"));
     }
 }

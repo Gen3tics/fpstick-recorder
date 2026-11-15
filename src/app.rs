@@ -520,7 +520,7 @@ impl App {
                     ui.selectable_value(&mut self.choices.mode, m.name.to_string(), text);
                 }
             });
-            c[1].label(RichText::new("Map").size(11.0).color(MUT));
+            c[1].label(RichText::new(if modes::has_code(&self.choices.mode) { "Import code" } else { "Map" }).size(11.0).color(MUT));
             if modes::has_map(&self.choices.mode) {
                 // One click opens every map of the 5v5 and 6v6 queues at once, in the game's kinds of match; a
                 // second click takes one. Or a few letters and Enter: the list opens with the cursor in its
@@ -534,6 +534,11 @@ impl App {
                 if !self.map_open {
                     self.map_typed.clear();
                 }
+            } else if modes::has_code(&self.choices.mode) {
+                // a custom game is started from an import code; that names it better than a map would
+                self.map_open = false;
+                c[1].add(egui::TextEdit::singleline(&mut self.choices.code).hint_text("Import code, such as VAXTA").desired_width(f32::INFINITY).char_limit(8));
+                self.choices.code = modes::code_shown(&self.choices.code);
             } else {
                 self.map_open = false;
                 c[1].add_space(5.0);
@@ -577,7 +582,7 @@ impl App {
         if o.game_settings.is_some() {
             item(ui, true, "Your Overwatch graphics settings, to make comparisons fair".into());
         }
-        item(ui, true, "What you chose: mode and map".into());
+        item(ui, true, if modes::has_code(&self.choices.mode) { "What you chose: mode and import code" } else { "What you chose: mode and map" }.into());
         if let Some(why) = &o.net_note {
             ui.label(RichText::new(format!("No network stats: {}", why)).size(13.0).color(AMBER));
         }
@@ -603,7 +608,8 @@ impl App {
                     *sent.lock().unwrap() = Sent::Sending;
                     let (sent, ctx, o, c) = (sent.clone(), ui.ctx().clone(), o.clone(), self.choices.clone());
                     std::thread::spawn(move || {
-                        let label = [c.map_said(), c.mode.as_str()].iter().filter(|s| !s.trim().is_empty()).cloned().collect::<Vec<_>>().join(", ");
+                        let code = c.code_said();
+                        let label = [c.map_said(), code.as_str(), c.mode.as_str()].iter().filter(|s| !s.trim().is_empty()).cloned().collect::<Vec<_>>().join(", ");
                         let data = std::fs::read(&o.packed).map_err(|e| format!("The packed file could not be read: {}", e));
                         let result = match (send::target(&c.send_to), data) {
                             (Err(why), _) | (_, Err(why)) => Err(why),
@@ -611,7 +617,7 @@ impl App {
                             (Ok(Some(host)), Ok(data)) => {
                                 let (resolution, refresh_hz) = send::screen(o.display.as_deref());
                                 let info = serde_json::json!({
-                                    "declared": {"map": c.map_said(), "mode": c.mode.trim()},
+                                    "declared": {"map": c.map_said(), "mode": c.mode.trim(), "code": code},
                                     "read": {"cpu": o.cpu, "gpu": o.gpu, "memory": o.memory, "resolution": resolution, "refresh_hz": refresh_hz},
                                     "captured_at": o.captured_at,
                                     "game_settings": o.game_settings,
