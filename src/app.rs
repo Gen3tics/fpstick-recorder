@@ -3,7 +3,7 @@
 use eframe::egui::{self, Color32, CornerRadius, RichText, Sense, Stroke, Vec2};
 use recorder::config::{self, Choices, Length, Place};
 use recorder::session::{self, Outcome, Phase, Session};
-use recorder::{platform, presentmon, send};
+use recorder::{modes, platform, presentmon, send};
 use std::sync::{Arc, Mutex};
 
 const BG: Color32 = Color32::from_rgb(0x0f, 0x12, 0x16);
@@ -93,7 +93,7 @@ impl App {
 
     /// Puts the window into one of its states with made-up content, without recording anything (`--show STATE`).
     fn show(&mut self, state: &str) {
-        self.choices = Choices { map: "King's Row".into(), mode: "Quick play".into(), hero: "Sojourn".into(), frame_limit: "320".into(), ..Choices::default() };
+        self.choices = Choices { map: "King's Row".into(), mode: "Quick Play 6v6".into(), hero: "Sojourn".into(), frame_limit: "320".into(), ..Choices::default() };
         let exe = "C:\\Program Files\\Intel\\PresentMon\\PresentMonConsoleApplication\\PresentMon-2.6.0-x64.exe";
         let folder = std::path::PathBuf::from("C:\\Users\\you\\Documents\\Recorder\\2026-11-11_164713");
         let command = presentmon::shown(exe, &presentmon::record_args("Overwatch.exe", &folder.join("frames.csv"), None));
@@ -426,15 +426,44 @@ impl App {
 
         // what was played is asked now, when it is known, not before the match
         label(ui, "This match (optional)");
-        // two to a row: four to a row cut a map's name short ("Practice Rang")
-        for pair in [[("Map", &mut self.choices.map), ("Mode", &mut self.choices.mode)], [("Hero", &mut self.choices.hero), ("Frame limit", &mut self.choices.frame_limit)]] {
-            ui.columns(2, |c| {
-                for (i, (name, value)) in pair.into_iter().enumerate() {
-                    c[i].label(RichText::new(name).size(11.0).color(MUT));
-                    c[i].add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY).char_limit(40));
+        // The mode comes first and is chosen from the game's own list: whether there is a map to name depends on
+        // it (Luka, 15 Nov 2026). Two fields to a row: four to a row cut a map's name short ("Practice Rang").
+        let colour = |f: modes::Family| { let (r, g, b) = f.rgb(); Color32::from_rgb(r, g, b) };
+        ui.columns(2, |c| {
+            c[0].label(RichText::new("Mode").size(11.0).color(MUT));
+            let chosen = modes::find(&self.choices.mode);
+            let shown = match chosen {
+                Some(m) => RichText::new(m.name).color(colour(m.family)),
+                None => RichText::new("Choose the mode").color(MUT),
+            };
+            let width = c[0].available_width();
+            egui::ComboBox::from_id_salt("mode").selected_text(shown).width(width).height(460.0).show_ui(&mut c[0], |ui| {
+                ui.selectable_value(&mut self.choices.mode, String::new(), RichText::new("Not said").color(MUT));
+                let mut family = None;
+                for m in modes::MODES.iter() {
+                    if family != Some(m.family) {
+                        ui.separator(); // one group for each tab of the game's Play menu
+                        family = Some(m.family);
+                    }
+                    ui.selectable_value(&mut self.choices.mode, m.name.to_string(), RichText::new(m.name).color(colour(m.family)));
                 }
             });
-        }
+            if modes::has_map(&self.choices.mode) {
+                let custom = chosen.map(|m| m.family == modes::Family::Custom).unwrap_or(false);
+                c[1].label(RichText::new(if custom { "Map or code" } else { "Map" }).size(11.0).color(MUT));
+                c[1].add(egui::TextEdit::singleline(&mut self.choices.map).desired_width(f32::INFINITY).char_limit(40));
+            } else {
+                c[1].label(RichText::new("Map").size(11.0).color(MUT));
+                c[1].add_space(5.0);
+                c[1].label(RichText::new("No map to name in this mode").size(13.0).color(MUT));
+            }
+        });
+        ui.columns(2, |c| {
+            for (i, (name, value)) in [("Hero", &mut self.choices.hero), ("Frame limit", &mut self.choices.frame_limit)].into_iter().enumerate() {
+                c[i].label(RichText::new(name).size(11.0).color(MUT));
+                c[i].add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY).char_limit(40));
+            }
+        });
 
         let to = send::target(&self.choices.send_to);
         label(ui, "Will be sent if you press Send");
@@ -469,7 +498,7 @@ impl App {
         if o.game_settings.is_some() {
             item(ui, true, "Your Overwatch graphics settings, to make comparisons fair".into());
         }
-        item(ui, true, "What you typed in: map, mode, hero, frame limit".into());
+        item(ui, true, "What you chose and typed in: mode, map, hero, frame limit".into());
         if let Some(why) = &o.net_note {
             ui.label(RichText::new(format!("No network stats: {}", why)).size(13.0).color(AMBER));
         }
@@ -495,15 +524,15 @@ impl App {
                     *sent.lock().unwrap() = Sent::Sending;
                     let (sent, ctx, o, c) = (sent.clone(), ui.ctx().clone(), o.clone(), self.choices.clone());
                     std::thread::spawn(move || {
-                        let label = [c.map.as_str(), c.mode.as_str(), c.hero.as_str()].iter().filter(|s| !s.trim().is_empty()).cloned().collect::<Vec<_>>().join(", ");
+                        let label = [c.map_said(), c.mode.as_str(), c.hero.as_str()].iter().filter(|s| !s.trim().is_empty()).cloned().collect::<Vec<_>>().join(", ");
                         let data = std::fs::read(&o.packed).map_err(|e| format!("The packed file could not be read: {}", e));
                         let result = match (send::target(&c.send_to), data) {
                             (Err(why), _) | (_, Err(why)) => Err(why),
-                            (Ok(None), Ok(data)) => send::send_local(&data, &o.packed.display().to_string(), &label, &c.map, &c.mode, &c.frame_limit, o.net.is_some()).map(|url| (url.clone(), url)),
+                            (Ok(None), Ok(data)) => send::send_local(&data, &o.packed.display().to_string(), &label, c.map_said(), &c.mode, &c.frame_limit, o.net.is_some()).map(|url| (url.clone(), url)),
                             (Ok(Some(host)), Ok(data)) => {
                                 let (resolution, refresh_hz) = send::screen(o.display.as_deref());
                                 let info = serde_json::json!({
-                                    "declared": {"map": c.map.trim(), "mode": c.mode.trim(), "hero": c.hero.trim(), "limit_fps": c.frame_limit.trim()},
+                                    "declared": {"map": c.map_said(), "mode": c.mode.trim(), "hero": c.hero.trim(), "limit_fps": c.frame_limit.trim()},
                                     "read": {"cpu": o.cpu, "gpu": o.gpu, "resolution": resolution, "refresh_hz": refresh_hz},
                                     "captured_at": o.captured_at,
                                     "game_settings": o.game_settings,

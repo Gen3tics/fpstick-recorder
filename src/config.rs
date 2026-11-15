@@ -95,7 +95,17 @@ impl Choices {
     }
 
     pub fn load() -> Choices {
-        std::fs::read(Self::file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        let mut c: Choices = std::fs::read(Self::file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        // the mode is chosen from the game's own list since 15 Nov 2026: text typed in before that is dropped
+        if crate::modes::find(&c.mode).is_none() {
+            c.mode.clear();
+        }
+        c
+    }
+
+    /// The map to say for this recording: none in a mode that has no map to name, whatever was typed earlier.
+    pub fn map_said(&self) -> &str {
+        if crate::modes::has_map(&self.mode) { self.map.trim() } else { "" }
     }
 
     pub fn save(&self) {

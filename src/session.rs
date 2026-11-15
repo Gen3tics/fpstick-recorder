@@ -298,7 +298,7 @@ pub fn save_sent(folder: &Path, page: &str, delete_key: &str) {
 pub fn save_scene(folder: &Path, c: &Choices) {
     let file = folder.join("run.json");
     let Ok(mut note) = std::fs::read(&file).map_err(|_| ()).and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).map_err(|_| ())) else { return };
-    note["scene"] = serde_json::json!({"map": c.map, "mode": c.mode, "hero": c.hero, "frame_limit": c.frame_limit});
+    note["scene"] = serde_json::json!({"map": c.map_said(), "mode": c.mode, "hero": c.hero, "frame_limit": c.frame_limit});
     let _ = std::fs::write(file, serde_json::to_vec_pretty(&note).unwrap_or_default());
 }
 
