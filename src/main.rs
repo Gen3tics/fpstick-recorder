@@ -101,7 +101,7 @@ fn main() {
         }
         _ => {
             let go = args.iter().any(|a| a == "--go");
-            // `--show STATE` draws one of the window's states with made-up content: setup, command, countdown, recording, finishing, done, failed
+            // `--show STATE` draws one of the window's states with made-up content: setup, command, countdown, recording, finishing, done, failed; "runs" is the list of the recordings in this PC's folder
             let show = args.iter().position(|a| a == "--show").and_then(|i| args.get(i + 1)).cloned();
             let options = eframe::NativeOptions {
                 viewport: eframe::egui::ViewportBuilder::default().with_title("FPStick Recorder").with_inner_size([430.0, 820.0]).with_min_inner_size([380.0, 520.0]),

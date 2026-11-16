@@ -1,4 +1,4 @@
-//! The window: one small window in three states (set up, recording, done).
+//! The window: one small window in three states (set up, recording, done), and the list of earlier runs.
 
 use eframe::egui::{self, Color32, CornerRadius, RichText, Sense, Stroke, Vec2};
 use recorder::config::{self, Choices, Length, Place};
@@ -31,6 +31,8 @@ enum View {
     Running(Session),
     Done(Outcome, Arc<Mutex<Sent>>),
     Failed(String),
+    /// The recordings kept on this PC, newest first, read when the list is opened.
+    Runs(Vec<session::Kept>),
 }
 
 /// The open map list: a search line, then every map by its kind of match in two columns. With something typed,
@@ -180,6 +182,7 @@ impl App {
             "finishing" => still(Phase::Finishing, 557.0),
             "done" => View::Done(Outcome { game_settings: Some(serde_json::json!({"section": "Render.13", "values": {"TextureDetail": "1"}, "changed_while_recording": false})), packed: folder.join("frames.fpsf"), folder, recording_bytes: 38_300_000, packed_bytes: 6_310_000, frames: 167_865, recorded_s: 557.0, captured_at: "2026-11-11T16:47:13".into(), cpu: Some("AMD Ryzen 7 9850X3D 8-Core Processor".into()), gpu: Some("NVIDIA GeForce RTX 5090".into()), memory: Some("32 GB RAM".into()), display: Some("2560 x 1440 at 360 Hz".into()), net: Some(recorder::net::NetSummary { datagrams: 106_512, received: 35_310, sent: 35_600, flows: 3, flow1_share: 0.666, probes: 8_340, hops: vec!["router", "isp", "edge"], pings_asked: true, events_lost: 0, ipv6: 0 }), net_note: None }, Arc::new(Mutex::new(Sent::No))),
             "failed" => View::Failed("Overwatch is not running. Start the game, then press Record again.".into()),
+            "runs" => View::Runs(session::kept_runs(&platform::recordings_dir())),
             "command" => {
                 self.show_command = true;
                 View::Setup
@@ -680,10 +683,89 @@ impl App {
                 if secondary(ui, "Record another", ui.available_width()).clicked() {
                     next = Some(View::Setup);
                 }
+                if secondary(ui, "Your runs", ui.available_width()).clicked() {
+                    next = Some(View::Runs(session::kept_runs(&platform::recordings_dir())));
+                }
             }
         }
         next
     }
+}
+
+/// The list of earlier runs: every recording kept on this PC, newest first, each with the way back to its run page.
+/// Nothing is asked of any server to draw it: it is read from the recordings' own folders.
+fn runs_list(ui: &mut egui::Ui, runs: &[session::Kept]) -> Option<View> {
+    let mut next = None;
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Your runs").size(22.0).strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if secondary(ui, "Back", 74.0).clicked() {
+                next = Some(View::Setup);
+            }
+        });
+    });
+    let sent = runs.iter().filter(|r| r.sent.is_some()).count();
+    note(ui, &match runs.len() {
+        0 => "No recordings on this PC yet. Each one you make is listed here, with the way back to its run page.".to_string(),
+        n => format!("{} recorded on this PC, {} of them sent. Newest first.", n, sent),
+    });
+    ui.add_space(4.0);
+    for r in runs {
+        egui::Frame::new().fill(FIELD).stroke(Stroke::new(1.0, LINE)).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(12, 9)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(session::when_shown(&r.captured_at)).size(14.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if r.recorded_s > 0.0 {
+                        ui.label(RichText::new(span(r.recorded_s)).size(12.0).color(MUT));
+                    }
+                });
+            });
+            // what was played, as it was said after the match: the mode in the game's colour, then the map or the code
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let place = if !r.map.is_empty() { r.map.clone() } else if !r.code.is_empty() { format!("Code {}", r.code) } else { String::new() };
+                match (modes::find(&r.mode), r.mode.is_empty()) {
+                    (Some(m), _) => { let (red, g, b) = m.family.rgb(); ui.label(RichText::new(m.name).size(13.0).color(Color32::from_rgb(red, g, b))); }
+                    (None, false) => { ui.label(RichText::new(&r.mode).size(13.0)); }
+                    (None, true) if place.is_empty() => { ui.label(RichText::new("Mode and map not said").size(13.0).color(MUT)); }
+                    (None, true) => {}
+                }
+                if !place.is_empty() {
+                    ui.label(RichText::new(place).size(13.0));
+                }
+            });
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                match (&r.sent, r.page_with_key()) {
+                    (Some((page, _)), Some(open)) => {
+                        if ui.add(egui::Button::new(RichText::new("Open run page").size(13.0).strong().color(ON_AMBER)).fill(AMBER).stroke(Stroke::NONE).corner_radius(CornerRadius::same(7))).clicked() {
+                            platform::open_url(&open);
+                        }
+                        // the address without the key: this is the one to give to someone else
+                        if ui.add(egui::Button::new(RichText::new("Copy link").size(13.0)).fill(Color32::TRANSPARENT).stroke(Stroke::new(1.0, EDGE)).corner_radius(CornerRadius::same(7))).on_hover_text("The page's address, to give to someone else. It does not let them delete the run.").clicked() {
+                            ui.ctx().copy_text(page.clone());
+                        }
+                    }
+                    _ => {
+                        ui.label(RichText::new("Kept on this PC, not sent").size(13.0).color(MUT));
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.link(RichText::new("Folder").size(12.0).color(MUT)).on_hover_text(r.folder.display().to_string()).clicked() {
+                        platform::open_url(&r.folder.display().to_string());
+                    }
+                });
+            });
+        });
+    }
+    if !runs.is_empty() {
+        ui.add_space(4.0);
+        note(ui, "Open run page also brings the Delete button back in your browser. Deleting a recording's folder takes it off this list, not off the site.");
+    }
+    next
 }
 
 fn command_box(ui: &mut egui::Ui, command: &str) {
@@ -707,6 +789,7 @@ impl eframe::App for App {
             self.record(&ctx);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(BG).inner_margin(16.0)).show(ui, |ui| {
+            let mut to_runs = false;
             ui.horizontal(|ui| {
                 ui.label(RichText::new("FPStick Recorder").size(15.0).strong());
                 ui.label(RichText::new(match &self.view {
@@ -714,11 +797,20 @@ impl eframe::App for App {
                     View::Running(_) => "· recording",
                     View::Done(..) => "· finished",
                     View::Failed(_) => "· stopped",
+                    View::Runs(_) => "· your runs",
                 }).size(13.0).color(MUT));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     egui::Frame::new().stroke(Stroke::new(1.0, EDGE)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 1)).show(ui, |ui| ui.label(RichText::new("Beta").size(11.0).color(MUT)));
+                    // The way back to earlier runs. Offered only where leaving loses nothing: not while recording,
+                    // and not on the finished screen before its recording is sent or kept.
+                    if matches!(self.view, View::Setup) && ui.link(RichText::new("Your runs").size(13.0)).clicked() {
+                        to_runs = true;
+                    }
                 });
             });
+            if to_runs {
+                self.view = View::Runs(session::kept_runs(&platform::recordings_dir()));
+            }
             ui.separator();
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 let next = match &self.view {
@@ -728,6 +820,7 @@ impl eframe::App for App {
                     }
                     View::Running(_) => self.running(ui),
                     View::Done(..) => self.done(ui),
+                    View::Runs(runs) => runs_list(ui, runs),
                     View::Failed(why) => {
                         ui.add_space(20.0);
                         ui.label(RichText::new("Nothing was recorded").size(20.0).strong());

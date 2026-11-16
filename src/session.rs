@@ -305,6 +305,69 @@ pub fn save_scene(folder: &Path, c: &Choices) {
     let _ = std::fs::write(file, serde_json::to_vec_pretty(&note).unwrap_or_default());
 }
 
+/// One recording kept on this PC, as its folder's run.json tells it: a row in the list of earlier runs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Kept {
+    pub folder: PathBuf,
+    /// Local date and time the recording began, "2026-11-13T17:30:05".
+    pub captured_at: String,
+    pub recorded_s: f64,
+    pub mode: String,
+    pub map: String,
+    pub code: String,
+    /// The run page it was sent to and the key that deletes it there. None if it never left this PC.
+    pub sent: Option<(String, String)>,
+}
+
+impl Kept {
+    /// The run page's address with the delete key after the "#", as it is opened from this PC: the browser then
+    /// offers Delete again even if it has forgotten the run. The key is never part of what a server is asked for.
+    pub fn page_with_key(&self) -> Option<String> {
+        self.sent.as_ref().map(|(page, key)| if key.is_empty() { page.clone() } else { format!("{}#k={}", page, key) })
+    }
+}
+
+/// "2026-11-13T17:30:05" as "13 Nov 2026, 17:30". Anything else is shown as it is.
+pub fn when_shown(captured_at: &str) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let b = captured_at.as_bytes();
+    let digits = |r: std::ops::Range<usize>| captured_at.get(r).filter(|t| t.bytes().all(|c| c.is_ascii_digit())).and_then(|t| t.parse::<usize>().ok());
+    match (b.len() >= 16 && b[4] == b'-' && b[7] == b'-' && b[10] == b'T' && b[13] == b':', digits(0..4), digits(5..7), digits(8..10), digits(11..13), digits(14..16)) {
+        (true, Some(y), Some(m @ 1..=12), Some(d), Some(h), Some(min)) => format!("{} {} {}, {:02}:{:02}", d, MONTHS[m - 1], y, h, min),
+        _ => captured_at.to_string(),
+    }
+}
+
+/// The recordings kept in `dir`, newest first. A folder without a readable run.json is not a finished recording
+/// and is left out. What a run.json says about where it was sent is believed only if it is a web address and the
+/// key is made of a key's letters: the address is later handed to Windows to open.
+pub fn kept_runs(dir: &Path) -> Vec<Kept> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut runs: Vec<Kept> = entries.flatten().filter_map(|e| {
+        let folder = e.path();
+        let note: serde_json::Value = serde_json::from_slice(&std::fs::read(folder.join("run.json")).ok()?).ok()?;
+        let text = |v: &serde_json::Value| v.as_str().unwrap_or("").trim().to_string();
+        let captured_at = text(&note["captured_at"]);
+        if captured_at.is_empty() {
+            return None;
+        }
+        let (page, key) = (text(&note["sent"]["run_page"]), text(&note["sent"]["delete_key"]));
+        let web = (page.starts_with("https://") || page.starts_with("http://")) && page.len() <= 300 && page.bytes().all(|c| c.is_ascii_alphanumeric() || b"-._~:/?&=%[]@".contains(&c));
+        let key_ok = key.len() <= 100 && key.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_');
+        Some(Kept {
+            folder,
+            captured_at,
+            recorded_s: note["recorded_s"].as_f64().unwrap_or(0.0),
+            mode: text(&note["scene"]["mode"]),
+            map: text(&note["scene"]["map"]),
+            code: text(&note["scene"]["code"]),
+            sent: if web { Some((page, if key_ok { key } else { String::new() })) } else { None },
+        })
+    }).collect();
+    runs.sort_by(|a, b| b.captured_at.cmp(&a.captured_at).then_with(|| b.folder.cmp(&a.folder)));
+    runs
+}
+
 /// Ends PresentMon the way it is meant to be ended, so the file is complete: a second PresentMon stops
 /// the named session and the recording one exits by itself. If it has not gone after ten seconds it is closed.
 fn end(exe: &Path, child: &mut std::process::Child) {
@@ -324,4 +387,50 @@ fn end(exe: &Path, child: &mut std::process::Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_date_is_shown_plainly() {
+        assert_eq!(when_shown("2026-11-13T17:30:05"), "13 Nov 2026, 17:30");
+        assert_eq!(when_shown("2026-01-02T03:04:59"), "2 Jan 2026, 03:04");
+        assert_eq!(when_shown("t1794840000"), "t1794840000");
+        assert_eq!(when_shown("2026-13-02T03:04:59"), "2026-13-02T03:04:59");
+        assert_eq!(when_shown(""), "");
+    }
+
+    #[test]
+    fn kept_recordings_are_listed_newest_first() {
+        let dir = std::env::temp_dir().join(format!("recorder-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let put = |name: &str, text: &str| {
+            std::fs::create_dir_all(dir.join(name)).unwrap();
+            std::fs::write(dir.join(name).join("run.json"), text).unwrap();
+        };
+        put("2026-11-14_101500", r#"{"captured_at": "2026-11-14T10:15:00", "recorded_s": 61.4, "scene": {"map": "", "mode": "Practice Range"}}"#);
+        put("2026-11-15_182617", r#"{"captured_at": "2026-11-15T18:26:17", "recorded_s": 557.0, "scene": {"map": "King's Row", "mode": "Competitive 5v5", "code": ""},
+            "sent": {"run_page": "https://fpstick.com/r/AbCdEfGhIjKlMnOpQrStUv", "delete_key": "k_-9"}}"#);
+        put("2026-11-15_200000", r#"{"captured_at": "2026-11-15T20:00:00", "scene": {"mode": "Custom game", "code": "VAXTA"},
+            "sent": {"run_page": "calc.exe", "delete_key": "x"}}"#);
+        put("2026-11-16_090000", r#"{"captured_at": "2026-11-16T09:00:00", "sent": {"run_page": "http://192.168.1.20:8770/r/AbCdEfGhIjKlMnOpQrStUv", "delete_key": "a b"}}"#);
+        put("broken", "{not json");
+        put("no-date", r#"{"frames": 3}"#);
+        std::fs::create_dir_all(dir.join("empty")).unwrap();
+        std::fs::write(dir.join("a-file.txt"), "x").unwrap();
+
+        let runs = kept_runs(&dir);
+        assert_eq!(runs.iter().map(|r| r.captured_at.as_str()).collect::<Vec<_>>(), ["2026-11-16T09:00:00", "2026-11-15T20:00:00", "2026-11-15T18:26:17", "2026-11-14T10:15:00"]);
+        // a key that is not a key's letters is dropped, the page is kept
+        assert_eq!(runs[0].page_with_key().as_deref(), Some("http://192.168.1.20:8770/r/AbCdEfGhIjKlMnOpQrStUv"));
+        // what is not a web address is never offered to be opened
+        assert_eq!((runs[1].sent.clone(), runs[1].code.as_str(), runs[1].page_with_key()), (None, "VAXTA", None));
+        assert_eq!(runs[2].page_with_key().as_deref(), Some("https://fpstick.com/r/AbCdEfGhIjKlMnOpQrStUv#k=k_-9"));
+        assert_eq!((runs[2].map.as_str(), runs[2].mode.as_str(), runs[2].recorded_s), ("King's Row", "Competitive 5v5", 557.0));
+        assert_eq!((runs[3].sent.clone(), runs[3].mode.as_str()), (None, "Practice Range"));
+        assert!(kept_runs(&dir.join("not-there")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

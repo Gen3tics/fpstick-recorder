@@ -57,6 +57,16 @@ not install a hook into the mouse's or keyboard's input.
   texture detail, effects quality, the frame cap and the window mode), so that runs made at different
   graphics settings are not compared as if they were alike. No other section of that file is read. The
   game writes only settings that differ from its defaults, so a setting that is missing is at its default.
+  After Send it also holds the run page's address and the key that deletes the run there.
+
+## Your runs
+
+"Your runs", at the top of the window, lists every recording kept in `Documents\Recorder`, newest first:
+when it was made, how long it ran, the mode and map you chose, and whether it was sent. For a run that
+was sent, "Open run page" opens its page again (with its delete key, so the page offers Delete even in a
+browser that has never seen the run) and "Copy link" copies the page's address without the key, to give
+to someone else. The list is read from the `run.json` files alone; no server is asked. Deleting a
+recording's folder takes it off the list and does not delete the run from the site.
 
 ## Building
 
