@@ -120,6 +120,8 @@ pub struct App {
     /// What has been typed into the map list to find a map, and whether that list was open in the last frame.
     map_typed: String,
     map_open: bool,
+    /// How many recordings are kept on this PC, for the number on the "Your runs" tab.
+    kept: usize,
 }
 
 impl App {
@@ -145,7 +147,7 @@ impl App {
             s.spacing.button_padding = Vec2::new(10.0, 6.0);
             s.spacing.default_area_size.y = 720.0; // room for the map list to show every map at once
         });
-        let mut app = App { choices: Choices::load(), view: View::Setup, choosing_key: false, show_command: false, note: None, go, spin: matches!(show, Some("spin") | Some("spin-net")), map_typed: String::new(), map_open: false };
+        let mut app = App { choices: Choices::load(), view: View::Setup, choosing_key: false, show_command: false, note: None, go, spin: matches!(show, Some("spin") | Some("spin-net")), map_typed: String::new(), map_open: false, kept: session::kept_runs(&platform::recordings_dir()).len() };
         if show == Some("spin-net") {
             // for testing the network record without a game: 64 times a second, a small packet to an address set
             // aside for documentation (192.0.2.1), which no machine has, and a larger one to this program itself,
@@ -695,16 +697,7 @@ impl App {
 /// The list of earlier runs: every recording kept on this PC, newest first, each with the way back to its run page.
 /// Nothing is asked of any server to draw it: it is read from the recordings' own folders.
 fn runs_list(ui: &mut egui::Ui, runs: &[session::Kept]) -> Option<View> {
-    let mut next = None;
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Your runs").size(22.0).strong());
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if secondary(ui, "Back", 74.0).clicked() {
-                next = Some(View::Setup);
-            }
-        });
-    });
+    ui.add_space(4.0);
     let sent = runs.iter().filter(|r| r.sent.is_some()).count();
     note(ui, &match runs.len() {
         0 => "No recordings on this PC yet. Each one you make is listed here, with the way back to its run page.".to_string(),
@@ -765,7 +758,30 @@ fn runs_list(ui: &mut egui::Ui, runs: &[session::Kept]) -> Option<View> {
         ui.add_space(4.0);
         note(ui, "Open run page also brings the Delete button back in your browser. Deleting a recording's folder takes it off this list, not off the site.");
     }
-    next
+    None
+}
+
+/// One of the window's tabs: its name, a count beside it if it has one, and a line under it when it is the open one.
+/// True when it was clicked.
+fn tab(ui: &mut egui::Ui, text: &str, count: Option<usize>, open: bool) -> bool {
+    let name = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(16.0), INK);
+    let number = count.map(|n| ui.painter().layout_no_wrap(n.to_string(), egui::FontId::proportional(11.5), INK));
+    let pill = number.as_ref().map(|g| Vec2::new(g.size().x + 12.0, 18.0));
+    let width = name.size().x + pill.map(|p| p.x + 7.0).unwrap_or(0.0);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::click());
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let ink = if open || resp.hovered() { INK } else { MUT };
+    let p = ui.painter();
+    p.galley_with_override_text_color(egui::pos2(rect.left(), rect.center().y - name.size().y / 2.0 - 1.0), name.clone(), ink);
+    if let (Some(g), Some(size)) = (number, pill) {
+        let r = egui::Rect::from_min_size(egui::pos2(rect.left() + name.size().x + 7.0, rect.center().y - size.y / 2.0 - 1.0), size);
+        p.rect_filled(r, CornerRadius::same(9), if open { AMBER } else { LINE });
+        p.galley_with_override_text_color(egui::pos2(r.center().x - g.size().x / 2.0, r.center().y - g.size().y / 2.0), g.clone(), if open { ON_AMBER } else { ink });
+    }
+    if open {
+        p.hline(rect.left()..=rect.right(), rect.bottom() - 1.5, Stroke::new(3.0, AMBER));
+    }
+    resp.clicked()
 }
 
 fn command_box(ui: &mut egui::Ui, command: &str) {
@@ -789,29 +805,46 @@ impl eframe::App for App {
             self.record(&ctx);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(BG).inner_margin(16.0)).show(ui, |ui| {
-            let mut to_runs = false;
             ui.horizontal(|ui| {
                 ui.label(RichText::new("FPStick Recorder").size(15.0).strong());
-                ui.label(RichText::new(match &self.view {
-                    View::Setup => "· ready",
-                    View::Running(_) => "· recording",
-                    View::Done(..) => "· finished",
-                    View::Failed(_) => "· stopped",
-                    View::Runs(_) => "· your runs",
-                }).size(13.0).color(MUT));
+                egui::Frame::new().stroke(Stroke::new(1.0, EDGE)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 1)).show(ui, |ui| ui.label(RichText::new("Beta").size(11.0).color(MUT)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    egui::Frame::new().stroke(Stroke::new(1.0, EDGE)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 1)).show(ui, |ui| ui.label(RichText::new("Beta").size(11.0).color(MUT)));
-                    // The way back to earlier runs. Offered only where leaving loses nothing: not while recording,
-                    // and not on the finished screen before its recording is sent or kept.
-                    if matches!(self.view, View::Setup) && ui.link(RichText::new("Your runs").size(13.0)).clicked() {
-                        to_runs = true;
-                    }
+                    ui.label(RichText::new(match &self.view {
+                        View::Setup | View::Runs(_) => "",
+                        View::Running(_) => "recording",
+                        View::Done(..) => "finished",
+                        View::Failed(_) => "stopped",
+                    }).size(13.0).color(MUT));
                 });
             });
-            if to_runs {
-                self.view = View::Runs(session::kept_runs(&platform::recordings_dir()));
-            }
-            ui.separator();
+            // The window's two places, as two tabs: Record, and Your runs (Luka, 16 Nov 2026: a link in the corner
+            // read as flavour text). They are offered only where leaving loses nothing: not while recording, and not
+            // on the finished screen, whose recording is not yet sent or kept.
+            let line_y = if matches!(self.view, View::Setup | View::Runs(_) | View::Failed(_)) {
+                let on_runs = matches!(self.view, View::Runs(_));
+                let (mut to_record, mut to_runs) = (false, false);
+                ui.add_space(4.0);
+                let row = ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 22.0;
+                    to_record = tab(ui, "Record", None, !on_runs) && on_runs;
+                    to_runs = tab(ui, "Your runs", Some(self.kept), on_runs) && !on_runs;
+                });
+                if to_record {
+                    self.view = View::Setup;
+                }
+                if to_runs {
+                    let runs = session::kept_runs(&platform::recordings_dir());
+                    self.kept = runs.len();
+                    self.view = View::Runs(runs);
+                }
+                row.response.rect.bottom()
+            } else {
+                ui.add_space(6.0);
+                ui.cursor().top()
+            };
+            let across = ui.max_rect();
+            ui.painter().hline(across.left()..=across.right(), line_y - 0.5, Stroke::new(1.0, LINE));
+            ui.add_space(6.0);
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 let next = match &self.view {
                     View::Setup => {
@@ -831,6 +864,8 @@ impl eframe::App for App {
                 };
                 if let Some(v) = next {
                     self.view = v;
+                    // a recording may just have been made or sent: count again what is kept
+                    self.kept = session::kept_runs(&platform::recordings_dir()).len();
                 }
             });
         });

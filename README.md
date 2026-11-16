@@ -61,7 +61,7 @@ not install a hook into the mouse's or keyboard's input.
 
 ## Your runs
 
-"Your runs", at the top of the window, lists every recording kept in `Documents\Recorder`, newest first:
+The window has two tabs, "Record" and "Your runs". "Your runs" lists every recording kept in `Documents\Recorder`, newest first:
 when it was made, how long it ran, the mode and map you chose, and whether it was sent. For a run that
 was sent, "Open run page" opens its page again (with its delete key, so the page offers Delete even in a
 browser that has never seen the run) and "Copy link" copies the page's address without the key, to give
