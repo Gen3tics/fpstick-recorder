@@ -1,9 +1,9 @@
 # Tests on every push, and a Windows build to download from the run's page.
 name: build
 
+# Only on pushes to this repository itself: a pull request from someone's fork does not start it.
 on:
   push:
-  pull_request:
 
 permissions:
   contents: read
