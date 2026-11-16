@@ -21,9 +21,15 @@ jobs:
           cargo test
       - name: Build
         run: cargo build --release
+      - name: The folder people get, zipped (as the release makes it)
+        shell: pwsh
+        run: ./packaging/package.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: recorder-windows
-          path: target/release/recorder.exe
+          path: |
+            target/release/recorder.exe
+            FPStick-Recorder.zip
+            FPStick-Recorder.zip.sha256
           if-no-files-found: error
           retention-days: 30
