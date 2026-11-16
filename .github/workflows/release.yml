@@ -1,0 +1,76 @@
+# The download. When a version tag (v0.1.0) is pushed, GitHub builds the recorder from this code, puts Intel's
+# PresentMon beside it (the one file, checked by its hash and by Intel's signature), and attaches the zip to a
+# release. Nobody's own PC is part of it.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  PRESENTMON: PresentMon-2.6.0-x64.exe
+  PRESENTMON_FROM: https://github.com/GameTechDev/PresentMon/releases/download/v2.6.0/PresentMon-2.6.0-x64.exe
+  PRESENTMON_SHA256: b2a706bc6ad475749e3b7e3409263aa1e6906d45bdcf993f6dbc0f660188f1af
+  PRESENTMON_LICENCE: https://raw.githubusercontent.com/GameTechDev/PresentMon/v2.6.0/LICENSE.txt
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: The tag is the program's version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "The tag is $env:GITHUB_REF_NAME but Cargo.toml says $version" }
+      - name: Tests
+        run: |
+          rustc --version
+          cargo test --manifest-path framedata/Cargo.toml
+          cargo test
+      - name: Build
+        run: cargo build --release
+      - name: Intel's PresentMon, the one file
+        shell: pwsh
+        run: |
+          Invoke-WebRequest $env:PRESENTMON_FROM -OutFile $env:PRESENTMON
+          $hash = (Get-FileHash $env:PRESENTMON -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:PRESENTMON_SHA256) { throw "PresentMon's hash is $hash, not the one written here" }
+          $sig = Get-AuthenticodeSignature $env:PRESENTMON
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notlike '*O=Intel Corporation*') { throw "PresentMon is not signed by Intel: $($sig.Status) $($sig.SignerCertificate.Subject)" }
+          Invoke-WebRequest $env:PRESENTMON_LICENCE -OutFile PresentMon-LICENSE.txt
+      - name: The folder people get
+        shell: pwsh
+        run: |
+          $d = "FPStick Recorder"
+          New-Item -ItemType Directory "$d\licences" | Out-Null
+          Copy-Item target\release\recorder.exe "$d\FPStick Recorder.exe"
+          Copy-Item $env:PRESENTMON $d
+          Copy-Item "packaging\READ ME FIRST.txt" $d
+          Copy-Item LICENSE-MIT "$d\licences\FPStick Recorder - MIT.txt"
+          Copy-Item LICENSE-APACHE "$d\licences\FPStick Recorder - Apache 2.0.txt"
+          Copy-Item PresentMon-LICENSE.txt "$d\licences\PresentMon (Intel) - MIT.txt"
+          # the libraries built into the recorder, each with the licence it is under and where its code is
+          "The recorder is built with these libraries. Each is under the licence named beside it; its text is in the library's own repository.`r`n" | Out-File "$d\licences\Libraries.txt" -Encoding utf8
+          cargo tree --edges normal --prefix none --format "{p} | {l} | {r}" --target x86_64-pc-windows-msvc | Sort-Object -Unique | Out-File "$d\licences\Libraries.txt" -Encoding utf8 -Append
+          # the bundled program must be found by the built one, and must start
+          & "$d\$env:PRESENTMON" --help | Select-Object -First 3
+          $found = & "$d\FPStick Recorder.exe" info | Select-String '^PresentMon:'
+          "$found"
+          if ("$found" -notlike "*$d\$env:PRESENTMON") { throw "The recorder did not find the PresentMon beside it" }
+          Compress-Archive -Path $d -DestinationPath FPStick-Recorder.zip
+          $zip = (Get-FileHash FPStick-Recorder.zip -Algorithm SHA256).Hash.ToLower()
+          "$zip  FPStick-Recorder.zip" | Out-File FPStick-Recorder.zip.sha256 -Encoding ascii
+          Get-ChildItem $d -Recurse | Select-Object FullName, Length
+          Get-Item FPStick-Recorder.zip | Select-Object Name, Length
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = "FPStick Recorder $env:GITHUB_REF_NAME, built by GitHub from this repository's code at this tag.`n`nUnpack the zip and start **FPStick Recorder**. The guide: https://fpstick.com/guide`n`nIntel's PresentMon 2.6.0 is included unchanged (SHA-256 ``$env:PRESENTMON_SHA256``). The download is not signed, so Windows warns before running it the first time."
+          gh release create $env:GITHUB_REF_NAME FPStick-Recorder.zip FPStick-Recorder.zip.sha256 --title "FPStick Recorder $env:GITHUB_REF_NAME" --notes $notes

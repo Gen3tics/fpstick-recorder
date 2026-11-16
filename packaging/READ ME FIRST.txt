@@ -1,0 +1,57 @@
+FPStick Recorder (beta)
+=======================
+
+Records a match of Overwatch on your PC and turns it into a page you can read
+and share: https://fpstick.com
+
+The guide with pictures: https://fpstick.com/guide
+
+
+In this folder
+--------------
+
+  FPStick Recorder.exe       the program you start
+  PresentMon-2.6.0-x64.exe   Intel's PresentMon, unchanged. It measures the
+                             frames; the recorder starts it for you.
+  licences                   the licences of both, and of the libraries used
+
+Keep the two programs in the same folder. Nothing is installed: to remove the
+recorder, delete this folder.
+
+
+The short version
+-----------------
+
+1. Start Overwatch.
+
+2. Double-click "FPStick Recorder".
+   Windows may say "Windows protected your PC". It says so for every program
+   that is new and not yet known to Microsoft. Choose "More info", then
+   "Run anyway".
+
+3. Press Record before your match. Windows asks whether the program may make
+   changes to your PC: choose Yes. Measuring another program's frames needs
+   administrator rights.
+
+4. After five seconds you hear a sound. Play your match.
+
+5. Hold your stop key for a second when the match is over. The stop key is
+   shown on the first screen and can be changed there.
+
+6. Look at what would be sent, then press "Send and open my run page".
+   Nothing leaves your PC before you press it.
+
+Your earlier runs are under the "Your runs" tab.
+
+
+Where things are kept
+---------------------
+
+  Recordings:  the folder "Recorder" inside your Documents folder
+  Settings:    %APPDATA%\Recorder\choices.json
+
+What is sent and what is kept: https://fpstick.com/privacy
+The code: https://github.com/Gen3tics/fpstick-recorder
+Questions, or something not working: info@fpstick.com
+
+Not affiliated with or endorsed by Blizzard Entertainment or Intel.
