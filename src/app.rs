@@ -141,7 +141,17 @@ impl App {
         v.widgets.hovered.bg_stroke = Stroke::new(1.0, MUT);
         v.widgets.active.weak_bg_fill = Color32::from_rgb(0x22, 0x28, 0x30);
         v.hyperlink_color = INK;
-        cc.egui_ctx.set_visuals(v);
+        // The window has one look, a dark one, whatever Windows is set to. Left to itself the window library follows
+        // Windows: on a PC in light mode it switched to its own light look, for which none of the above was set,
+        // and drew dark text on this dark window (Sabina's PC, 16 Nov 2026, the first PC in light mode to run it).
+        // So the dark look is asked for outright, and the same colours are given to both looks.
+        cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+        cc.egui_ctx.set_visuals_of(egui::Theme::Dark, v.clone());
+        cc.egui_ctx.set_visuals_of(egui::Theme::Light, v);
+        // For checking the look as it is on a PC whose Windows is set to its light mode, where there is none to hand.
+        if std::env::var_os("RECORDER_AS_IF_LIGHT").is_some() {
+            cc.egui_ctx.set_theme(egui::ThemePreference::Light);
+        }
         cc.egui_ctx.all_styles_mut(|s| {
             s.spacing.item_spacing = Vec2::new(8.0, 7.0);
             s.spacing.button_padding = Vec2::new(10.0, 6.0);

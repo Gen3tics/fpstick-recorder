@@ -1,6 +1,6 @@
 [package]
 name = "recorder"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "FPStick Recorder: records an Overwatch match with Intel PresentMon and packs the frame and network timing for a run page"
 license = "MIT OR Apache-2.0"
