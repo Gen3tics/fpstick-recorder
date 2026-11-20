@@ -1,6 +1,6 @@
 [package]
 name = "recorder"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "FPStick Recorder: records an Overwatch match with Intel PresentMon and packs the frame and network timing for a run page"
 license = "MIT OR Apache-2.0"
@@ -38,3 +38,8 @@ opt-level = 2
 lto = "thin"
 strip = true
 panic = "abort"
+
+# The Windows program says what it is: its name, version and where it comes from are written into the file itself
+# (build.rs). Without them it is an anonymous file to Windows and to antivirus programs.
+[build-dependencies]
+winresource = "0.1"

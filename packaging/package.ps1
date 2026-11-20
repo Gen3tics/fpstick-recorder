@@ -27,6 +27,12 @@ Copy-Item LICENSE-APACHE "$d\licences\FPStick Recorder - Apache 2.0.txt"
 "The recorder is built with these libraries. Each is under the licence named beside it; its text is in the library's own repository.`r`n" | Out-File "$d\licences\Libraries.txt" -Encoding utf8
 cargo tree --edges normal --prefix none --format '{p} | {l} | {r}' --target x86_64-pc-windows-msvc | Sort-Object -Unique | Out-File "$d\licences\Libraries.txt" -Encoding utf8 -Append
 
+# the program must say what it is: name and version are written into the file when it is built (build.rs)
+$about = (Get-Item "$d\FPStick Recorder.exe").VersionInfo
+$wanted = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
+"{0} {1}, by {2}" -f $about.ProductName, $about.ProductVersion, $about.CompanyName
+if ($about.ProductName -ne 'FPStick Recorder' -or $about.ProductVersion -ne $wanted) { throw "The program does not carry its name and version $wanted" }
+
 # the built recorder must find the PresentMon beside it
 $found = (& "$d\FPStick Recorder.exe" info | Select-String '^PresentMon:' | Select-Object -First 1).Line
 "$found"
